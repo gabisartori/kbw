@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Fixed plugin `pown` for the Dense simulator.
+- Libket updated to 0.2.3.
+
 ## 0.1.4
 
 - Added dump type selection with environment variables:

@@ -21,19 +21,15 @@ pub type Result<T> = result::Result<T, KBWError>;
 impl KBWError {
     pub fn to_str(&self) -> &'static str {
         match self {
-            KBWError::Success => "the call returned successfully",
-            KBWError::UndefinedError => "undefined error",
-            KBWError::Timeout => "quantum execution timeout",
-            KBWError::OutOfQubits => {
-                "cannot allocate more qubits (maybe you are deallocating too many qubits as dirty)"
-            }
-            KBWError::UnsupportedNumberOfQubits => {
-                "dense simulator do not allow more then 32 qubits"
-            }
-            KBWError::UnsupportedPlugin => "unsupported plugin gate",
-            KBWError::NotReadyForExecution => "not ready for execution",
-            KBWError::UndefinedSimMode => "undefined simulation mode",
-            KBWError::UndefinedDataType => "undefined data type",
+            KBWError::Success => "The function call completed successfully.",
+            KBWError::UndefinedError => "An undefined error occurred.",
+            KBWError::Timeout => "The quantum execution has timed out.",
+            KBWError::OutOfQubits => "Cannot allocate more qubits. Ensure you are not deallocating too many qubits as dirty.",
+            KBWError::UnsupportedNumberOfQubits => "The number of requested qubits is not supported.",
+            KBWError::UnsupportedPlugin => "The specified plugin gate is not supported.",
+            KBWError::NotReadyForExecution => "The process is not yet ready for execution.",
+            KBWError::UndefinedSimMode => "The simulation mode is undefined.",
+            KBWError::UndefinedDataType => "The data type is undefined.",
         }
     }
 

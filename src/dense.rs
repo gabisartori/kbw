@@ -3,6 +3,7 @@ use crate::quantum_execution::QuantumExecution;
 use crate::{bitwise::*, convert};
 use itertools::Itertools;
 use ket::ir::Metrics;
+use num::complex::ComplexFloat;
 use num::{complex::Complex64, Zero};
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
@@ -67,15 +68,20 @@ impl Dense {
 
         next_state
             .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
+            .for_each(|x| *x = Complex64::new(0.0, 0.0));
+
+        current_state.iter().enumerate().for_each(|(state, amp)| {
+            if amp.abs() > 1e-10 {
                 let a_b = (state & ((1 << qubits_size) - 1)) as u64;
                 let a = a_b >> l;
-                let mut b = a_b & ((1 << l) - 1);
-                b *= crate::bitwise::pown(x, a, n);
-                let a_b = (a << l) | b;
-                *amp = current_state[a_b as usize];
-            });
+                let b = a_b & ((1u64 << l) - 1);
+
+                let new_b = b * crate::bitwise::pown(x, a, n);
+                let a_b = (a << l) | new_b;
+
+                next_state[a_b as usize] = *amp;
+            }
+        });
     }
 
     fn dump_vec(&self, qubits: &[usize]) -> ket::DumpData {
