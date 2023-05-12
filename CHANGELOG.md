@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Libket updated to 0.3.0.
+
 ## 0.1.5
 
 - Fixed plugin `pown` for the Dense simulator.
