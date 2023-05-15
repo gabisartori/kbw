@@ -2,7 +2,7 @@
 compile_error!("compilation is only allowed for 64-bit targets");
 
 pub mod bitwise;
-pub mod c_wrapper;
+pub mod c_api;
 pub mod convert;
 pub mod dense;
 pub mod error;

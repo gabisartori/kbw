@@ -41,7 +41,7 @@ pub fn from_dump_prob_to_dump_shots<R: Rng>(
             let mut count_map = HashMap::new();
             let dist = WeightedIndex::new(probabilities).unwrap();
 
-            (0..shots).into_iter().for_each(|_| {
+            (0..shots).for_each(|_| {
                 count_map
                     .entry(&basis_states[dist.sample(rng)])
                     .and_modify(|c| *c += 1)
