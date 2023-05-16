@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Fixed for Libket version 0.3.1.
+
 ## 0.1.6
 
 - Updated Libket to version 0.3.0.

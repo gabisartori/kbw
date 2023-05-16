@@ -59,15 +59,15 @@ pub unsafe extern "C" fn kbw_run_serialized(
     };
 
     let quantum_code: Vec<ket::code_block::CodeBlock> = match data_type {
-        ket::serialize::DataType::JSON => serde_json::from_slice(quantum_code).unwrap(),
-        ket::serialize::DataType::BIN => bincode::deserialize(quantum_code).unwrap(),
+        ket::serialize::DataType::Json => serde_json::from_slice(quantum_code).unwrap(),
+        ket::serialize::DataType::Bin => bincode::deserialize(quantum_code).unwrap(),
     };
 
     let quantum_code: Vec<&ket::code_block::CodeBlock> = quantum_code.iter().collect();
 
     let metrics: ket::ir::Metrics = match data_type {
-        ket::serialize::DataType::JSON => serde_json::from_slice(metrics).unwrap(),
-        ket::serialize::DataType::BIN => bincode::deserialize(metrics).unwrap(),
+        ket::serialize::DataType::Json => serde_json::from_slice(metrics).unwrap(),
+        ket::serialize::DataType::Bin => bincode::deserialize(metrics).unwrap(),
     };
 
     let result_data = match SimMode::from_i32(sim_mode) {
@@ -97,8 +97,8 @@ pub unsafe extern "C" fn kbw_run_serialized(
     };
 
     let result_data: Vec<u8> = match data_type {
-        ket::serialize::DataType::JSON => serde_json::to_vec(&result_data).unwrap(),
-        ket::serialize::DataType::BIN => bincode::serialize(&result_data).unwrap(),
+        ket::serialize::DataType::Json => serde_json::to_vec(&result_data).unwrap(),
+        ket::serialize::DataType::Bin => bincode::serialize(&result_data).unwrap(),
     };
 
     *result = Box::into_raw(Box::new(result_data));
