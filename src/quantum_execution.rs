@@ -1,12 +1,14 @@
-use crate::error::{KBWError, Result};
-use ket::code_block::CodeBlock;
-use ket::instruction::{ClassicalOp, EndInstruction, Instruction, QuantumGate};
-use ket::ir::{Metrics, ResultData};
-use ket::Process;
-use std::time::Instant;
+use itertools::Itertools;
+use ket::{Angle, LiveExecution};
+use num::Integer;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
+use crate::{
+    convert::{from_dump_to_prob, from_prob_to_shots},
+    error::Result,
+};
 pub trait QuantumExecution {
-    fn new(metrics: &Metrics) -> Result<Self>
+    fn new(num_qubits: usize) -> Result<Self>
     where
         Self: Sized;
     fn pauli_x(&mut self, target: usize, control: &[usize]);
@@ -17,219 +19,224 @@ pub trait QuantumExecution {
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]);
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]);
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
-    fn unitary(&mut self, gate: &[[(f64, f64); 2]; 2], target: usize, control: &[usize]);
-    fn measure(&mut self, target: usize) -> bool;
+    fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> ket::DumpData;
-    fn plugin(&mut self, name: &str, args: &str, target: &[usize]) -> Result<()>;
 }
 
-pub fn run<S: QuantumExecution>(
-    sim: &mut S,
-    quantum_code: &[&CodeBlock],
-    metrics: &Metrics,
-) -> Result<ResultData> {
-    if !metrics.ready {
-        return Err(KBWError::NotReadyForExecution);
+pub struct QubitManager<S: QuantumExecution> {
+    simulator: S,
+    qubit_stack: Vec<usize>,
+    qubit_map: Vec<usize>,
+    rng: StdRng,
+}
+
+impl<S: QuantumExecution + 'static> QubitManager<S> {
+    pub fn new(num_qubits: usize) -> Result<Self> {
+        let seed = std::env::var("KBW_SEED")
+            .unwrap_or_default()
+            .parse::<u64>()
+            .unwrap_or_else(|_| rand::random());
+        Ok(QubitManager {
+            simulator: S::new(num_qubits)?,
+            qubit_stack: (0..num_qubits).collect_vec(),
+            qubit_map: (0..num_qubits).collect_vec(),
+            rng: StdRng::seed_from_u64(seed),
+        })
     }
 
-    let mut qubit_stack: Vec<usize> = (0..metrics.qubit_simultaneous).collect();
-    let mut qubit_stack_dirty = Vec::new();
-    let mut qubit_map: Vec<usize> = (0..metrics.qubit_simultaneous).collect();
+    pub fn features(num_qubits: usize) -> ket::Features {
+        ket::Features {
+            allow_measure: true,
+            allow_sample: true,
+            allow_exp_value: true,
+            allow_dump: true,
+            valid_after_measure: true,
+            continue_after_sample: true,
+            continue_after_exp_value: true,
+            continue_after_dump: true,
+            decompose: false,
+            live_quantum_execution: Some(Box::new(Self::new(num_qubits).unwrap())),
+            num_qubits,
+        }
+    }
+}
 
-    let mut int_register = vec![0; metrics.future_count];
-
-    let mut dump_register = Vec::with_capacity(metrics.dump_count);
-    for _ in 0..metrics.dump_count {
-        dump_register.push(ket::DumpData::Probability {
-            basis_states: Vec::new(),
-            probabilities: Vec::new(),
-        });
+impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
+    fn alloc(&mut self, target: usize) {
+        let qubit_index = self.qubit_stack.pop().unwrap();
+        self.qubit_map[target] = qubit_index;
     }
 
-    let mut current_block = 0usize;
+    fn free(&mut self, target: usize) {
+        self.qubit_stack.push(self.qubit_map[target]);
+    }
 
-    let qubit_vec_map = |control: &[usize], qubit_map: &[usize]| -> Vec<usize> {
-        control.iter().map(|index| qubit_map[*index]).collect()
-    };
-
-    let start = Instant::now();
-
-    'quantum_run: loop {
-        for instruction in &quantum_code[current_block].instructions {
-            if let Some(timeout) = metrics.timeout {
-                if start.elapsed().as_secs() > timeout {
-                    return Err(KBWError::Timeout);
-                }
-            }
-            match instruction {
-                Instruction::Alloc { dirty, target } => {
-                    let qubit_index = if *dirty & !qubit_stack_dirty.is_empty() {
-                        qubit_stack_dirty.pop().unwrap()
+    fn gate(&mut self, gate: &ket::QuantumGate, target: usize, control: &[usize]) {
+        match gate {
+            ket::QuantumGate::PauliX(angle) => match angle {
+                Angle::Scalar(theta) => self.simulator.rx(*theta, target, control),
+                Angle::PiFraction { top, bottom } => {
+                    if *top == 1 && *bottom == 1 {
+                        self.simulator.pauli_x(target, control)
                     } else {
-                        match qubit_stack.pop() {
-                            Some(index) => index,
-                            None => return Err(KBWError::OutOfQubits),
-                        }
-                    };
-                    qubit_map[*target] = qubit_index;
+                        self.simulator.rx(
+                            std::f64::consts::PI * *top as f64 / *bottom as f64,
+                            target,
+                            control,
+                        )
+                    }
                 }
-                Instruction::Free { dirty, target } => {
-                    if *dirty {
-                        qubit_stack_dirty.push(qubit_map[*target]);
+            },
+            ket::QuantumGate::PauliY(angle) => match angle {
+                Angle::Scalar(theta) => self.simulator.ry(*theta, target, control),
+                Angle::PiFraction { top, bottom } => {
+                    if *top == 1 && *bottom == 1 {
+                        self.simulator.pauli_y(target, control)
                     } else {
-                        qubit_stack.push(qubit_map[*target]);
+                        self.simulator.ry(
+                            std::f64::consts::PI * *top as f64 / *bottom as f64,
+                            target,
+                            control,
+                        )
                     }
                 }
-                Instruction::Gate {
-                    gate,
-                    target,
-                    control,
-                } => match gate {
-                    QuantumGate::PauliX => {
-                        sim.pauli_x(qubit_map[*target], &qubit_vec_map(control, &qubit_map))
+            },
+            ket::QuantumGate::PauliZ(angle) => match angle {
+                Angle::Scalar(theta) => self.simulator.rz(*theta, target, control),
+                Angle::PiFraction { top, bottom } => {
+                    if *top == 1 && *bottom == 1 {
+                        self.simulator.pauli_z(target, control)
+                    } else {
+                        self.simulator.rz(
+                            std::f64::consts::PI * *top as f64 / *bottom as f64,
+                            target,
+                            control,
+                        )
                     }
-                    QuantumGate::PauliY => {
-                        sim.pauli_y(qubit_map[*target], &qubit_vec_map(control, &qubit_map))
-                    }
-                    QuantumGate::PauliZ => {
-                        sim.pauli_z(qubit_map[*target], &qubit_vec_map(control, &qubit_map))
-                    }
-                    QuantumGate::Hadamard => {
-                        sim.hadamard(qubit_map[*target], &qubit_vec_map(control, &qubit_map))
-                    }
-                    QuantumGate::Phase(lambda) => sim.phase(
-                        *lambda,
-                        qubit_map[*target],
-                        &qubit_vec_map(control, &qubit_map),
-                    ),
-                    QuantumGate::RX(theta) => sim.rx(
-                        *theta,
-                        qubit_map[*target],
-                        &qubit_vec_map(control, &qubit_map),
-                    ),
-                    QuantumGate::RY(theta) => sim.ry(
-                        *theta,
-                        qubit_map[*target],
-                        &qubit_vec_map(control, &qubit_map),
-                    ),
-                    QuantumGate::RZ(theta) => sim.rz(
-                        *theta,
-                        qubit_map[*target],
-                        &qubit_vec_map(control, &qubit_map),
-                    ),
-                    QuantumGate::Unitary(gate) => sim.unitary(
-                        gate,
-                        qubit_map[*target],
-                        &qubit_vec_map(control, &qubit_map),
-                    ),
-                },
-                Instruction::Measure { qubits, output } => {
-                    int_register[*output] = qubits
-                        .iter()
-                        .rev()
-                        .map(|qubit| qubit_map[*qubit])
-                        .enumerate()
-                        .map(|(index, qubit)| (sim.measure(qubit) as i64) << index)
-                        .reduce(|a, b| a | b)
-                        .unwrap_or(0);
                 }
-                Instruction::Plugin { name, args, target } => {
-                    sim.plugin(name, args, &qubit_vec_map(target, &qubit_map))?;
-                }
-                Instruction::End(inst) => match inst {
-                    EndInstruction::Jump { addr } => current_block = *addr,
-                    EndInstruction::Branch {
-                        test,
-                        then,
-                        otherwise,
-                    } => {
-                        current_block = if int_register[*test] != 0 {
-                            *then
+            },
+            ket::QuantumGate::Hadamard => self.simulator.hadamard(target, control),
+        }
+    }
+
+    fn measure(&mut self, qubits: &[usize]) -> i64 {
+        qubits
+            .iter()
+            .rev()
+            .map(|qubit| self.qubit_map[*qubit])
+            .enumerate()
+            .map(|(index, qubit)| (self.simulator.measure(qubit, &mut self.rng) as i64) << index)
+            .reduce(|a, b| a | b)
+            .unwrap_or(0)
+    }
+
+    fn exp_value(&mut self, hamiltonian: &ket::PauliHamiltonian) -> f64 {
+        hamiltonian
+            .products
+            .iter()
+            .map(|pauli_terms| {
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    ket::Pauli::PauliX => self.simulator.hadamard(term.qubit, &[]),
+                    ket::Pauli::PauliY => {
+                        self.simulator.hadamard(term.qubit, &[]);
+                        self.simulator
+                            .phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[])
+                    }
+                    ket::Pauli::PauliZ => {}
+                });
+
+                let dump_data = self
+                    .simulator
+                    .dump(&pauli_terms.iter().map(|term| term.qubit).collect_vec());
+                let probabilities = from_dump_to_prob(dump_data);
+
+                let result: f64 = probabilities
+                    .basis_states
+                    .iter()
+                    .zip(probabilities.probabilities.iter())
+                    .map(|(state, prob)| {
+                        let parity = if state
+                            .iter()
+                            .fold(0, |acc, bit| acc + bit.count_ones())
+                            .is_even()
+                        {
+                            1.0
                         } else {
-                            *otherwise
+                            -1.0
                         };
+                        *prob * parity
+                    })
+                    .sum();
+
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    ket::Pauli::PauliX => self.simulator.hadamard(term.qubit, &[]),
+                    ket::Pauli::PauliY => {
+                        self.simulator.hadamard(term.qubit, &[]);
+                        self.simulator
+                            .phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[])
                     }
-                    EndInstruction::Halt => break 'quantum_run,
-                },
-                Instruction::IntOp {
-                    op,
-                    result,
-                    lhs,
-                    rhs,
-                } => match op {
-                    ClassicalOp::Eq => {
-                        int_register[*result] = (int_register[*lhs] == int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Neq => {
-                        int_register[*result] = (int_register[*lhs] != int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Gt => {
-                        int_register[*result] = (int_register[*lhs] > int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Geq => {
-                        int_register[*result] = (int_register[*lhs] >= int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Lt => {
-                        int_register[*result] = (int_register[*lhs] < int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Leq => {
-                        int_register[*result] = (int_register[*lhs] <= int_register[*rhs]) as i64
-                    }
-                    ClassicalOp::Add => {
-                        int_register[*result] = int_register[*lhs] + int_register[*rhs]
-                    }
-                    ClassicalOp::Sub => {
-                        int_register[*result] = int_register[*lhs] - int_register[*rhs]
-                    }
-                    ClassicalOp::Mul => {
-                        int_register[*result] = int_register[*lhs] * int_register[*rhs]
-                    }
-                    ClassicalOp::Div => {
-                        int_register[*result] = int_register[*lhs] / int_register[*rhs]
-                    }
-                    ClassicalOp::Sll => {
-                        int_register[*result] = int_register[*lhs] << int_register[*rhs]
-                    }
-                    ClassicalOp::Srl => {
-                        int_register[*result] = int_register[*lhs] >> int_register[*rhs]
-                    }
-                    ClassicalOp::And => {
-                        int_register[*result] = int_register[*lhs] & int_register[*rhs]
-                    }
-                    ClassicalOp::Or => {
-                        int_register[*result] = int_register[*lhs] | int_register[*rhs]
-                    }
-                    ClassicalOp::Xor => {
-                        int_register[*result] = int_register[*lhs] ^ int_register[*rhs]
-                    }
-                    ClassicalOp::Mod => {
-                        int_register[*result] = int_register[*lhs] % int_register[*rhs]
-                    }
-                },
-                Instruction::IntSet { result, value } => {
-                    int_register[*result] = *value;
-                }
-                Instruction::Dump { qubits, output } => {
-                    dump_register[*output] = sim.dump(&qubit_vec_map(qubits, &qubit_map));
-                }
+                    ket::Pauli::PauliZ => {}
+                });
+
+                result
+            })
+            .zip(&hamiltonian.coefficients)
+            .map(|(result, coefficient)| result * *coefficient)
+            .sum()
+    }
+
+    fn sample(&mut self, qubits: &[usize], shots: u64) -> Vec<(Vec<u64>, u64)> {
+        let data = self.simulator.dump(qubits);
+        from_prob_to_shots(from_dump_to_prob(data), shots, &mut self.rng)
+    }
+
+    fn dump(&mut self, qubits: &[usize]) -> ket::DumpData {
+        self.simulator.dump(qubits)
+    }
+}
+
+pub fn run<S: QuantumExecution + 'static>(
+    quantum_code: &[ket::Instruction],
+    metadata: &ket::Metadata,
+) -> Result<ket::ir::ResultData> {
+    let mut sim = QubitManager::<S>::new(metadata.qubit_simultaneous)?;
+
+    let mut result = ket::ir::ResultData::default();
+
+    for instruction in quantum_code {
+        match instruction {
+            ket::Instruction::Alloc { target } => sim.alloc(*target),
+            ket::Instruction::Free { target } => sim.free(*target),
+            ket::Instruction::Gate {
+                gate,
+                target,
+                control,
+            } => sim.gate(gate, *target, control),
+            ket::Instruction::Measure { qubits, output } => {
+                assert!(result.measurements.len() == *output);
+                result.measurements.push(sim.measure(qubits));
+            }
+            ket::Instruction::ExpValue {
+                hamiltonian,
+                output,
+            } => {
+                assert!(result.exp_values.len() == *output);
+                result.exp_values.push(sim.exp_value(hamiltonian));
+            }
+            ket::Instruction::Sample {
+                qubits,
+                shots,
+                output,
+            } => {
+                assert!(result.samples.len() == *output);
+                result.samples.push(sim.sample(qubits, *shots));
+            }
+            ket::Instruction::Dump { qubits, output } => {
+                assert!(result.dumps.len() == *output);
+                result.dumps.push(sim.dump(qubits));
             }
         }
     }
 
-    let exec_time = start.elapsed().as_secs_f64();
-
-    Ok(ResultData {
-        future: int_register,
-        dump: dump_register,
-        exec_time,
-    })
-}
-
-pub fn run_and_set_result<S: QuantumExecution>(process: &mut Process) -> Result<()> {
-    let metrics = process.metrics();
-    let instructions = process.blocks();
-    let mut sim = S::new(metrics)?;
-    let result = run(&mut sim, &instructions, metrics)?;
-    process.set_result(result).unwrap();
-    Ok(())
+    Ok(result)
 }
