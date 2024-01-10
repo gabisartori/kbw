@@ -1,5 +1,11 @@
+// SPDX-FileCopyrightText: 2020 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2020 Rafael de Santiago <r.santiago@ufsc.br>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use itertools::Itertools;
 use ket::{Angle, LiveExecution};
+use log::{debug, info, trace};
 use num::Integer;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -21,6 +27,9 @@ pub trait QuantumExecution {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> ket::DumpData;
+    fn debug_state(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct QubitManager<S: QuantumExecution> {
@@ -28,6 +37,7 @@ pub struct QubitManager<S: QuantumExecution> {
     qubit_stack: Vec<usize>,
     qubit_map: Vec<usize>,
     rng: StdRng,
+    result: Option<ket::ir::ResultData>,
 }
 
 impl<S: QuantumExecution + 'static> QubitManager<S> {
@@ -41,11 +51,12 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             qubit_stack: (0..num_qubits).collect_vec(),
             qubit_map: (0..num_qubits).collect_vec(),
             rng: StdRng::seed_from_u64(seed),
+            result: None,
         })
     }
 
-    pub fn features(num_qubits: usize) -> ket::Features {
-        ket::Features {
+    pub fn configuration(num_qubits: usize, live: bool) -> ket::Configuration {
+        ket::Configuration {
             allow_measure: true,
             allow_sample: true,
             allow_exp_value: true,
@@ -55,8 +66,18 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             continue_after_exp_value: true,
             continue_after_dump: true,
             decompose: false,
-            live_quantum_execution: Some(Box::new(Self::new(num_qubits).unwrap())),
+            live_quantum_execution: if live {
+                Some(Box::new(Self::new(num_qubits).unwrap()))
+            } else {
+                None
+            },
             num_qubits,
+            batch_execution: if live {
+                None
+            } else {
+                Some(Box::new(Self::new(num_qubits).unwrap()))
+            },
+            execution_timeout: None,
         }
     }
 }
@@ -65,6 +86,8 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
     fn alloc(&mut self, target: usize) {
         let qubit_index = self.qubit_stack.pop().unwrap();
         self.qubit_map[target] = qubit_index;
+
+        info!("live execution: alloc target={}->{}", target, qubit_index);
     }
 
     fn free(&mut self, target: usize) {
@@ -72,8 +95,26 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
     }
 
     fn gate(&mut self, gate: &ket::QuantumGate, target: usize, control: &[usize]) {
+        let target = self.qubit_map[target];
+        let control = &control.iter().map(|x| self.qubit_map[*x]).collect_vec();
+
+        trace!(
+            "live execution: gate={:?}, target={}, control={:?}",
+            gate,
+            target,
+            control
+        );
+
+        debug!(
+            "live execution: before gate={:?}, target={}, control={:?}\n{}",
+            gate,
+            target,
+            control,
+            self.simulator.debug_state().unwrap_or_default()
+        );
+
         match gate {
-            ket::QuantumGate::PauliX(angle) => match angle {
+            ket::QuantumGate::RotationX(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rx(*theta, target, control),
                 Angle::PiFraction { top, bottom } => {
                     if *top == 1 && *bottom == 1 {
@@ -87,7 +128,7 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                     }
                 }
             },
-            ket::QuantumGate::PauliY(angle) => match angle {
+            ket::QuantumGate::RotationY(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.ry(*theta, target, control),
                 Angle::PiFraction { top, bottom } => {
                     if *top == 1 && *bottom == 1 {
@@ -101,7 +142,7 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                     }
                 }
             },
-            ket::QuantumGate::PauliZ(angle) => match angle {
+            ket::QuantumGate::RotationZ(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rz(*theta, target, control),
                 Angle::PiFraction { top, bottom } => {
                     if *top == 1 && *bottom == 1 {
@@ -116,10 +157,23 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                 }
             },
             ket::QuantumGate::Hadamard => self.simulator.hadamard(target, control),
+            ket::QuantumGate::PauliX => self.simulator.pauli_x(target, control),
+            ket::QuantumGate::PauliY => self.simulator.pauli_y(target, control),
+            ket::QuantumGate::PauliZ => self.simulator.pauli_z(target, control),
         }
+
+        debug!(
+            "live execution: after gate={:?}, target={}, control={:?}\n{}",
+            gate,
+            target,
+            control,
+            self.simulator.debug_state().unwrap_or_default()
+        );
     }
 
     fn measure(&mut self, qubits: &[usize]) -> i64 {
+        let qubits = qubits.iter().map(|x| self.qubit_map[*x]).collect_vec();
+
         qubits
             .iter()
             .rev()
@@ -136,11 +190,14 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
             .iter()
             .map(|pauli_terms| {
                 pauli_terms.iter().for_each(|term| match term.pauli {
-                    ket::Pauli::PauliX => self.simulator.hadamard(term.qubit, &[]),
+                    ket::Pauli::PauliX => self.simulator.hadamard(self.qubit_map[term.qubit], &[]),
                     ket::Pauli::PauliY => {
-                        self.simulator.hadamard(term.qubit, &[]);
-                        self.simulator
-                            .phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[])
+                        self.simulator.hadamard(self.qubit_map[term.qubit], &[]);
+                        self.simulator.phase(
+                            -std::f64::consts::FRAC_PI_2,
+                            self.qubit_map[term.qubit],
+                            &[],
+                        )
                     }
                     ket::Pauli::PauliZ => {}
                 });
@@ -169,11 +226,14 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                     .sum();
 
                 pauli_terms.iter().for_each(|term| match term.pauli {
-                    ket::Pauli::PauliX => self.simulator.hadamard(term.qubit, &[]),
+                    ket::Pauli::PauliX => self.simulator.hadamard(self.qubit_map[term.qubit], &[]),
                     ket::Pauli::PauliY => {
-                        self.simulator.hadamard(term.qubit, &[]);
-                        self.simulator
-                            .phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[])
+                        self.simulator.hadamard(self.qubit_map[term.qubit], &[]);
+                        self.simulator.phase(
+                            -std::f64::consts::FRAC_PI_2,
+                            self.qubit_map[term.qubit],
+                            &[],
+                        )
                     }
                     ket::Pauli::PauliZ => {}
                 });
@@ -185,58 +245,69 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
             .sum()
     }
 
-    fn sample(&mut self, qubits: &[usize], shots: u64) -> Vec<(Vec<u64>, u64)> {
-        let data = self.simulator.dump(qubits);
+    fn sample(&mut self, qubits: &[usize], shots: u64) -> (Vec<u64>, Vec<u64>) {
+        let qubits = qubits.iter().map(|x| self.qubit_map[*x]).collect_vec();
+
+        let data = self.simulator.dump(&qubits);
         from_prob_to_shots(from_dump_to_prob(data), shots, &mut self.rng)
     }
 
     fn dump(&mut self, qubits: &[usize]) -> ket::DumpData {
-        self.simulator.dump(qubits)
+        let qubits = qubits.iter().map(|x| self.qubit_map[*x]).collect_vec();
+
+        self.simulator.dump(&qubits)
     }
 }
 
-pub fn run<S: QuantumExecution + 'static>(
-    quantum_code: &[ket::Instruction],
-    metadata: &ket::Metadata,
-) -> Result<ket::ir::ResultData> {
-    let mut sim = QubitManager::<S>::new(metadata.qubit_simultaneous)?;
-
-    let mut result = ket::ir::ResultData::default();
-
-    for instruction in quantum_code {
-        match instruction {
-            ket::Instruction::Alloc { target } => sim.alloc(*target),
-            ket::Instruction::Free { target } => sim.free(*target),
-            ket::Instruction::Gate {
-                gate,
-                target,
-                control,
-            } => sim.gate(gate, *target, control),
-            ket::Instruction::Measure { qubits, output } => {
-                assert!(result.measurements.len() == *output);
-                result.measurements.push(sim.measure(qubits));
-            }
-            ket::Instruction::ExpValue {
-                hamiltonian,
-                output,
-            } => {
-                assert!(result.exp_values.len() == *output);
-                result.exp_values.push(sim.exp_value(hamiltonian));
-            }
-            ket::Instruction::Sample {
-                qubits,
-                shots,
-                output,
-            } => {
-                assert!(result.samples.len() == *output);
-                result.samples.push(sim.sample(qubits, *shots));
-            }
-            ket::Instruction::Dump { qubits, output } => {
-                assert!(result.dumps.len() == *output);
-                result.dumps.push(sim.dump(qubits));
+impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
+    fn submit_execution(&mut self, instructions: &[ket::Instruction]) {
+        self.result = Some(ket::ir::ResultData::default());
+        for instruction in instructions {
+            match instruction {
+                ket::Instruction::Alloc { target } => self.alloc(*target),
+                ket::Instruction::Free { target } => self.free(*target),
+                ket::Instruction::Gate {
+                    gate,
+                    target,
+                    control,
+                } => self.gate(gate, *target, control),
+                ket::Instruction::Measure { qubits, output } => {
+                    assert!(self.result.as_ref().unwrap().measurements.len() == *output);
+                    let result = self.measure(qubits);
+                    self.result.as_mut().unwrap().measurements.push(result);
+                }
+                ket::Instruction::ExpValue {
+                    hamiltonian,
+                    output,
+                } => {
+                    assert!(self.result.as_ref().unwrap().exp_values.len() == *output);
+                    let result = self.exp_value(hamiltonian);
+                    self.result.as_mut().unwrap().exp_values.push(result);
+                }
+                ket::Instruction::Sample {
+                    qubits,
+                    shots,
+                    output,
+                } => {
+                    assert!(self.result.as_ref().unwrap().samples.len() == *output);
+                    let result = self.sample(qubits, *shots);
+                    self.result.as_mut().unwrap().samples.push(result);
+                }
+                ket::Instruction::Dump { qubits, output } => {
+                    assert!(self.result.as_ref().unwrap().dumps.len() == *output);
+                    let result = self.dump(qubits);
+                    self.result.as_mut().unwrap().dumps.push(result);
+                }
             }
         }
     }
 
-    Ok(result)
+    fn get_result(&mut self) -> ket::ResultData {
+        let result_data = self.result.take();
+        result_data.unwrap()
+    }
+
+    fn get_status(&self) -> ket::ExecutionStatus {
+        ket::ExecutionStatus::Completed
+    }
 }

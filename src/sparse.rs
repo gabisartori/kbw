@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2020 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2020 Rafael de Santiago <r.santiago@ufsc.br>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::bitwise::*;
 use crate::error::Result;
 use crate::quantum_execution::QuantumExecution;
@@ -325,30 +330,40 @@ impl QuantumExecution for Sparse {
             amplitudes_imag,
         }
     }
+
+    fn debug_state(&self) -> Option<String> {
+        let states = self.get_current_state();
+        let mut state_str = String::new();
+        for (state, amp) in states {
+            let state = state
+                .iter()
+                .map(|x| format!("{:064b}", x))
+                .reduce(|a, b| a + &b)
+                .unwrap_or_default();
+            state_str.push_str(&format!("{:?}: {:?}\n", state, amp));
+        }
+        Some(state_str)
+    }
 }
 #[cfg(test)]
 mod tests {
     #[test]
     fn bell_state() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let feature = crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::features(2);
-        let mut process = ket::Process::new(feature);
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
+        let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
 
         process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
         process.ctrl_push(&[qubit_a])?;
-        process.apply_gate(ket::QuantumGate::PauliX(ket::Angle::pi()), qubit_b)?;
+        process.apply_gate(ket::QuantumGate::PauliX, qubit_b)?;
         process.ctrl_pop()?;
 
         let d_ab = process.dump(&[qubit_a, qubit_b])?;
         let m_a = process.measure(&[qubit_a])?;
         let m_b = process.measure(&[qubit_b])?;
         let d_ab2 = process.dump(&[qubit_a, qubit_b])?;
-
-
-        println!("{}", process.quantum_code_as_json());
-
-        println!("{}", process.metadata_as_json());
 
         println!("{:?}", process.get_dump(d_ab));
         println!("{:?}", process.get_measurement(m_a));

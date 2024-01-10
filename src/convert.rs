@@ -1,6 +1,10 @@
+// SPDX-FileCopyrightText: 2020 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2020 Rafael de Santiago <r.santiago@ufsc.br>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use num::complex::{Complex64, ComplexFloat};
 use rand::{distributions::WeightedIndex, prelude::Distribution, Rng};
 use rayon::prelude::*;
@@ -28,7 +32,7 @@ pub(crate) fn from_prob_to_shots<R: Rng>(
     data: DumpProbability,
     shots: u64,
     rng: &mut R,
-) -> Vec<(Vec<u64>, u64)> {
+) -> (Vec<u64>, Vec<u64>) {
     let mut count_map = HashMap::new();
     let dist = WeightedIndex::new(data.probabilities).unwrap();
 
@@ -41,6 +45,6 @@ pub(crate) fn from_prob_to_shots<R: Rng>(
 
     count_map
         .drain()
-        .map(|(state, count)| (state.to_owned(), count))
-        .collect_vec()
+        .map(|(state, count)| (state[0], count))
+        .unzip()
 }

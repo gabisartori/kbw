@@ -1,7 +1,13 @@
+// SPDX-FileCopyrightText: 2020 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2020 Rafael de Santiago <r.santiago@ufsc.br>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::bitwise::*;
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::QuantumExecution;
 use itertools::Itertools;
+use log::error;
 use num::{complex::Complex64, Zero};
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
@@ -36,6 +42,7 @@ impl Dense {
 impl QuantumExecution for Dense {
     fn new(num_qubits: usize) -> Result<Self> {
         if num_qubits > 32 {
+            error!("dense implementation supports up to 32 qubits");
             return Err(KBWError::UnsupportedNumberOfQubits);
         }
 
@@ -316,20 +323,34 @@ impl QuantumExecution for Dense {
             amplitudes_imag,
         }
     }
+
+    fn debug_state(&self) -> Option<String> {
+        let state = self.get_current_state();
+        let mut state_str = String::new();
+        state_str.push_str("State:\n");
+        for (index, amp) in state.iter().enumerate() {
+            if amp.norm() < 1e-15 {
+                continue;
+            }
+            state_str.push_str(&format!("{:032b}: {:?}\n", index, amp));
+        }
+        Some(state_str)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn bell_state() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let feature = crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::features(2);
-        let mut process = ket::Process::new(feature);
+    fn bell_state_live() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
+        let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
 
         process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
         process.ctrl_push(&[qubit_a])?;
-        process.apply_gate(ket::QuantumGate::PauliX(ket::Angle::pi()), qubit_b)?;
+        process.apply_gate(ket::QuantumGate::PauliX, qubit_b)?;
         process.ctrl_pop()?;
 
         let d_ab = process.dump(&[qubit_a, qubit_b])?;
@@ -337,10 +358,33 @@ mod tests {
         let m_b = process.measure(&[qubit_b])?;
         let d_ab2 = process.dump(&[qubit_a, qubit_b])?;
 
+        println!("{:?}", process.get_dump(d_ab));
+        println!("{:?}", process.get_measurement(m_a));
+        println!("{:?}", process.get_measurement(m_b));
+        println!("{:?}", process.get_dump(d_ab2));
 
-        println!("{}", process.quantum_code_as_json());
+        Ok(())
+    }
 
-        println!("{}", process.metadata_as_json());
+    #[test]
+    fn bell_state_batch() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
+                2, false,
+            );
+        let mut process = ket::Process::new(configuration);
+        let qubit_a = process.allocate_qubit()?;
+        let qubit_b = process.allocate_qubit()?;
+
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
+        process.ctrl_push(&[qubit_a])?;
+        process.apply_gate(ket::QuantumGate::PauliX, qubit_b)?;
+        process.ctrl_pop()?;
+
+        let d_ab = process.dump(&[qubit_a, qubit_b])?;
+        let m_a = process.measure(&[qubit_a])?;
+        let m_b = process.measure(&[qubit_b])?;
+        let d_ab2 = process.dump(&[qubit_a, qubit_b])?;
 
         println!("{:?}", process.get_dump(d_ab));
         println!("{:?}", process.get_measurement(m_a));

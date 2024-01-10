@@ -1,15 +1,17 @@
+// SPDX-FileCopyrightText: 2020 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2020 Rafael de Santiago <r.santiago@ufsc.br>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use std::{error::Error, fmt::Display, result};
 
-use num::{FromPrimitive, ToPrimitive};
-use num_derive::{FromPrimitive, ToPrimitive};
-
-#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[derive(Debug, Clone, Copy)]
+#[repr(i32)]
 pub enum KBWError {
     Success,
     Timeout,
     OutOfQubits,
     UnsupportedNumberOfQubits,
-    UnsupportedPlugin,
     NotReadyForExecution,
     UndefinedDataType,
     UndefinedSimMode,
@@ -26,7 +28,6 @@ impl KBWError {
             KBWError::Timeout => "The quantum execution has timed out.",
             KBWError::OutOfQubits => "Cannot allocate more qubits. Ensure you are not deallocating too many qubits as dirty.",
             KBWError::UnsupportedNumberOfQubits => "The number of requested qubits is not supported.",
-            KBWError::UnsupportedPlugin => "The specified plugin gate is not supported.",
             KBWError::NotReadyForExecution => "The process is not yet ready for execution.",
             KBWError::UndefinedSimMode => "The simulation mode is undefined.",
             KBWError::UndefinedDataType => "The data type is undefined.",
@@ -34,11 +35,11 @@ impl KBWError {
     }
 
     pub fn error_code(&self) -> i32 {
-        self.to_i32().unwrap()
+        *self as i32
     }
 
     pub fn from_error_code(error_code: i32) -> KBWError {
-        Self::from_i32(error_code).unwrap_or(KBWError::UndefinedError)
+        unsafe { std::mem::transmute(error_code) }
     }
 }
 
