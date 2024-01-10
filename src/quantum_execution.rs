@@ -46,6 +46,9 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             .unwrap_or_default()
             .parse::<u64>()
             .unwrap_or_else(|_| rand::random());
+
+        info!("KBW seed={}", seed);
+
         Ok(QubitManager {
             simulator: S::new(num_qubits)?,
             qubit_stack: (0..num_qubits).collect_vec(),
@@ -87,7 +90,7 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
         let qubit_index = self.qubit_stack.pop().unwrap();
         self.qubit_map[target] = qubit_index;
 
-        info!("live execution: alloc target={}->{}", target, qubit_index);
+        debug!("alloc target={}->{}", target, qubit_index);
     }
 
     fn free(&mut self, target: usize) {
@@ -98,63 +101,43 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
         let target = self.qubit_map[target];
         let control = &control.iter().map(|x| self.qubit_map[*x]).collect_vec();
 
-        trace!(
-            "live execution: gate={:?}, target={}, control={:?}",
-            gate,
-            target,
-            control
-        );
-
         debug!(
-            "live execution: before gate={:?}, target={}, control={:?}\n{}",
-            gate,
-            target,
-            control,
-            self.simulator.debug_state().unwrap_or_default()
+            "apply gate={:?}, target={}, control={:?}",
+            gate, target, control
         );
 
         match gate {
             ket::QuantumGate::RotationX(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rx(*theta, target, control),
-                Angle::PiFraction { top, bottom } => {
-                    if *top == 1 && *bottom == 1 {
-                        self.simulator.pauli_x(target, control)
-                    } else {
-                        self.simulator.rx(
-                            std::f64::consts::PI * *top as f64 / *bottom as f64,
-                            target,
-                            control,
-                        )
-                    }
-                }
+                Angle::PiFraction { top, bottom } => self.simulator.rx(
+                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                    target,
+                    control,
+                ),
             },
             ket::QuantumGate::RotationY(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.ry(*theta, target, control),
-                Angle::PiFraction { top, bottom } => {
-                    if *top == 1 && *bottom == 1 {
-                        self.simulator.pauli_y(target, control)
-                    } else {
-                        self.simulator.ry(
-                            std::f64::consts::PI * *top as f64 / *bottom as f64,
-                            target,
-                            control,
-                        )
-                    }
-                }
+                Angle::PiFraction { top, bottom } => self.simulator.ry(
+                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                    target,
+                    control,
+                ),
             },
             ket::QuantumGate::RotationZ(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rz(*theta, target, control),
-                Angle::PiFraction { top, bottom } => {
-                    if *top == 1 && *bottom == 1 {
-                        self.simulator.pauli_z(target, control)
-                    } else {
-                        self.simulator.rz(
-                            std::f64::consts::PI * *top as f64 / *bottom as f64,
-                            target,
-                            control,
-                        )
-                    }
-                }
+                Angle::PiFraction { top, bottom } => self.simulator.rz(
+                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                    target,
+                    control,
+                ),
+            },
+            ket::QuantumGate::Phase(angle) => match angle {
+                Angle::Scalar(theta) => self.simulator.phase(*theta, target, control),
+                Angle::PiFraction { top, bottom } => self.simulator.phase(
+                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                    target,
+                    control,
+                ),
             },
             ket::QuantumGate::Hadamard => self.simulator.hadamard(target, control),
             ket::QuantumGate::PauliX => self.simulator.pauli_x(target, control),
@@ -162,8 +145,8 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
             ket::QuantumGate::PauliZ => self.simulator.pauli_z(target, control),
         }
 
-        debug!(
-            "live execution: after gate={:?}, target={}, control={:?}\n{}",
+        trace!(
+            "after gate={:?}, target={}, control={:?}\n{}",
             gate,
             target,
             control,
@@ -174,14 +157,22 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
     fn measure(&mut self, qubits: &[usize]) -> i64 {
         let qubits = qubits.iter().map(|x| self.qubit_map[*x]).collect_vec();
 
-        qubits
+        debug!("measuring qubits={:?}", qubits);
+
+        let result = qubits
             .iter()
-            .rev()
-            .map(|qubit| self.qubit_map[*qubit])
             .enumerate()
-            .map(|(index, qubit)| (self.simulator.measure(qubit, &mut self.rng) as i64) << index)
+            .map(|(index, qubit)| (self.simulator.measure(*qubit, &mut self.rng) as i64) << index)
             .reduce(|a, b| a | b)
-            .unwrap_or(0)
+            .unwrap_or(0);
+
+        trace!(
+            "after measurement qubits={:?}\n{}",
+            qubits,
+            self.simulator.debug_state().unwrap_or_default()
+        );
+
+        result
     }
 
     fn exp_value(&mut self, hamiltonian: &ket::PauliHamiltonian) -> f64 {
@@ -192,19 +183,22 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                 pauli_terms.iter().for_each(|term| match term.pauli {
                     ket::Pauli::PauliX => self.simulator.hadamard(self.qubit_map[term.qubit], &[]),
                     ket::Pauli::PauliY => {
-                        self.simulator.hadamard(self.qubit_map[term.qubit], &[]);
                         self.simulator.phase(
                             -std::f64::consts::FRAC_PI_2,
                             self.qubit_map[term.qubit],
                             &[],
-                        )
+                        );
+                        self.simulator.hadamard(self.qubit_map[term.qubit], &[]);
                     }
                     ket::Pauli::PauliZ => {}
                 });
 
-                let dump_data = self
-                    .simulator
-                    .dump(&pauli_terms.iter().map(|term| term.qubit).collect_vec());
+                let dump_data = self.simulator.dump(
+                    &pauli_terms
+                        .iter()
+                        .map(|term| self.qubit_map[term.qubit])
+                        .collect_vec(),
+                );
                 let probabilities = from_dump_to_prob(dump_data);
 
                 let result: f64 = probabilities
@@ -230,7 +224,7 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
                     ket::Pauli::PauliY => {
                         self.simulator.hadamard(self.qubit_map[term.qubit], &[]);
                         self.simulator.phase(
-                            -std::f64::consts::FRAC_PI_2,
+                            std::f64::consts::FRAC_PI_2,
                             self.qubit_map[term.qubit],
                             &[],
                         )
