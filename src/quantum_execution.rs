@@ -154,15 +154,16 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
         );
     }
 
-    fn measure(&mut self, qubits: &[usize]) -> i64 {
+    fn measure(&mut self, qubits: &[usize]) -> u64 {
         let qubits = qubits.iter().map(|x| self.qubit_map[*x]).collect_vec();
 
         debug!("measuring qubits={:?}", qubits);
 
         let result = qubits
             .iter()
+            .rev()
             .enumerate()
-            .map(|(index, qubit)| (self.simulator.measure(*qubit, &mut self.rng) as i64) << index)
+            .map(|(index, qubit)| (self.simulator.measure(*qubit, &mut self.rng) as u64) << index)
             .reduce(|a, b| a | b)
             .unwrap_or(0);
 
