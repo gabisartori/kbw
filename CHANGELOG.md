@@ -7,6 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+## 0.2.0
+
+- Updated Libket to version 0.4.0, adding the `batch` and `live` execution modes.
+
 ## 0.1.7
 
 - Fixed for Libket version 0.3.1.

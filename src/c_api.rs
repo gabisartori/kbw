@@ -28,11 +28,28 @@ pub extern "C" fn kbw_set_log_level(level: u32) -> i32 {
 pub mod error {
     use crate::error::{KBWError, Result};
 
+    /// Returns the error message for the given error code.
+    ///
+    /// # Safety
+    ///
+    /// This functions is unsafe because it assumes that the error code is valid.
     #[no_mangle]
-    pub extern "C" fn kbw_error_message(error_code: i32, size: &mut usize) -> *const u8 {
-        let msg = KBWError::from_error_code(error_code).to_str();
-        *size = msg.len();
-        msg.as_ptr()
+    pub unsafe extern "C" fn kbw_error_message(
+        error_code: i32,
+        buffer: *mut u8,
+        buffer_size: usize,
+        write_size: &mut usize,
+    ) -> i32 {
+        let msg = unsafe { KBWError::from_error_code(error_code) }.to_string();
+        let msg = msg.as_bytes();
+        *write_size = msg.len();
+        if buffer_size >= *write_size {
+            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, buffer_size) };
+            buffer[..*write_size].copy_from_slice(msg);
+            0
+        } else {
+            1
+        }
     }
 
     pub fn wrapper(error: Result<()>) -> i32 {

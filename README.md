@@ -17,14 +17,6 @@ KBW features two simulation methods:
 This project is part of the Ket Quantum Programming platform, see the documentation for
 more information <https://quantumket.org>.
 
-## Ket Quantum Programming platform  
-
-![Ket Quantum Programming platform architecture](https://gitlab.com/quantum-ket/ket-everywhere/-/raw/main/architecture.png)
-
-## Examples
-
-For examples of KBW being used in Python (Ket), Rust, C, and C++, check out the [Ket Everywhere repository](https://gitlab.com/quantum-ket/ket-everywhere).
-
 ## License
 
 Libket is released under the Apache-2.0 License. See [LICENSE](LICENSE) for more information.

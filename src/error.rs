@@ -3,53 +3,57 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{error::Error, fmt::Display, result};
+use std::result;
 
-#[derive(Debug, Clone, Copy)]
+/// Enumeration of possible errors in the KBW simulator.
+#[derive(thiserror::Error, Debug, Clone, Copy)]
 #[repr(i32)]
 pub enum KBWError {
+    #[error("The function call completed successfully.")]
     Success,
-    Timeout,
-    OutOfQubits,
-    UnsupportedNumberOfQubits,
-    NotReadyForExecution,
-    UndefinedDataType,
-    UndefinedSimMode,
+
+    #[error("An undefined error occurred.")]
     UndefinedError,
+
+    #[error("The quantum execution has timed out.")]
+    Timeout,
+
+    #[error(
+        "Cannot allocate more qubits. Ensure you are not deallocating too many qubits as dirty."
+    )]
+    OutOfQubits,
+
+    #[error("The number of requested qubits is not supported.")]
+    UnsupportedNumberOfQubits,
+
+    #[error("The process is not yet ready for execution.")]
+    NotReadyForExecution,
+
+    #[error("The simulation mode is undefined.")]
+    UndefinedSimMode,
+
+    #[error("The data type is undefined.")]
+    UndefinedDataType,
 }
 
+/// Result type for KBW library functions.
 pub type Result<T> = result::Result<T, KBWError>;
 
 impl KBWError {
-    pub fn to_str(&self) -> &'static str {
-        match self {
-            KBWError::Success => "The function call completed successfully.",
-            KBWError::UndefinedError => "An undefined error occurred.",
-            KBWError::Timeout => "The quantum execution has timed out.",
-            KBWError::OutOfQubits => "Cannot allocate more qubits. Ensure you are not deallocating too many qubits as dirty.",
-            KBWError::UnsupportedNumberOfQubits => "The number of requested qubits is not supported.",
-            KBWError::NotReadyForExecution => "The process is not yet ready for execution.",
-            KBWError::UndefinedSimMode => "The simulation mode is undefined.",
-            KBWError::UndefinedDataType => "The data type is undefined.",
-        }
-    }
-
+    /// Returns the error code as an integer.
     pub fn error_code(&self) -> i32 {
         *self as i32
     }
 
-    pub fn from_error_code(error_code: i32) -> KBWError {
+    /// Converts an error code into a KBWError.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it assumes that the error code is valid.
+    pub unsafe fn from_error_code(error_code: i32) -> KBWError {
         unsafe { std::mem::transmute(error_code) }
     }
 }
-
-impl Display for KBWError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_str())
-    }
-}
-
-impl Error for KBWError {}
 
 #[cfg(test)]
 mod tests {
@@ -64,7 +68,7 @@ mod tests {
     fn print_error_code() {
         let mut error_code = 0;
         loop {
-            let error = KBWError::from_error_code(error_code);
+            let error = unsafe { KBWError::from_error_code(error_code) };
             println!("#define KBW_{:#?} {}", error, error_code);
 
             if let KBWError::UndefinedError = error {
