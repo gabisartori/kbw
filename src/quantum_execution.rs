@@ -58,7 +58,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
         })
     }
 
-    pub fn configuration(num_qubits: usize, live: bool) -> ket::Configuration {
+    pub fn configuration(num_qubits: usize, live: bool, decompose: bool) -> ket::Configuration {
         ket::Configuration {
             allow_measure: true,
             allow_sample: true,
@@ -68,7 +68,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             continue_after_sample: true,
             continue_after_exp_value: true,
             continue_after_dump: true,
-            decompose: false,
+            decompose,
             live_quantum_execution: if live {
                 Some(Box::new(Self::new(num_qubits).unwrap()))
             } else {
@@ -299,6 +299,7 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
 
     fn get_result(&mut self) -> ket::ResultData {
         let result_data = self.result.take();
+        info!("result={:?}", result_data);
         result_data.unwrap()
     }
 

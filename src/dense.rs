@@ -340,10 +340,33 @@ impl QuantumExecution for Dense {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dump_h2() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
+                2, true, false,
+            );
+        let mut process = ket::Process::new(configuration);
+        let qubit_a = process.allocate_qubit()?;
+        let qubit_b = process.allocate_qubit()?;
+
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_b)?;
+
+        let d_a = process.dump(&[qubit_a])?;
+
+        println!("{:?}", process.get_dump(d_a));
+
+        Ok(())
+    }
+
     #[test]
     fn bell_state_live() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
+                2, true, false,
+            );
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
@@ -369,8 +392,8 @@ mod tests {
     #[test]
     fn bell_state_batch() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
-                2, false,
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
+                2, false, false,
             );
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
@@ -390,6 +413,31 @@ mod tests {
         println!("{:?}", process.get_measurement(m_a));
         println!("{:?}", process.get_measurement(m_b));
         println!("{:?}", process.get_dump(d_ab2));
+
+        Ok(())
+    }
+
+    #[test]
+    fn bell_state_sample() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        crate::c_api::kbw_set_log_level(3);
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
+                2, false, false,
+            );
+        let mut process = ket::Process::new(configuration);
+        let qubit_a = process.allocate_qubit()?;
+        let qubit_b = process.allocate_qubit()?;
+
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
+        process.ctrl_push(&[qubit_a])?;
+        process.apply_gate(ket::QuantumGate::PauliX, qubit_b)?;
+        process.ctrl_pop()?;
+
+        let s_ab = process.sample(&[qubit_a, qubit_b], 1024)?;
+
+        process.prepare_for_execution()?;
+
+        println!("{:?}", process.get_sample(s_ab));
 
         Ok(())
     }

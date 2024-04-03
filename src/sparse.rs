@@ -347,10 +347,33 @@ impl QuantumExecution for Sparse {
 }
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dump_h2() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let configuration =
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
+                2, true, false,
+            );
+        let mut process = ket::Process::new(configuration);
+        let qubit_a = process.allocate_qubit()?;
+        let qubit_b = process.allocate_qubit()?;
+
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
+        process.apply_gate(ket::QuantumGate::Hadamard, qubit_b)?;
+
+        let d_a = process.dump(&[qubit_a])?;
+
+        println!("{:?}", process.get_dump(d_a));
+
+        Ok(())
+    }
+
     #[test]
     fn bell_state() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
+                2, true, false,
+            );
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
