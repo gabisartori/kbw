@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2024 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+stages:
+  - lint
+  - test
+
+cargo-clippy:
+  image: rust:1.75-buster
+  stage: lint
+  script:
+    - rustup component add clippy
+    - cargo clippy --all-features -- -D warnings
+
+reuse:
+  image: python:slim
+  stage: lint
+  script:
+    - pip install reuse
+    - reuse lint
+
+cargo-test:
+  image: rust:1.75-buster
+  stage: test
+  script:
+    - cargo test --all-features

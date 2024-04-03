@@ -7,6 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+## 0.2.1
+
+- Update Libket to version 0.4.1.
+- Added option to enable quantum gate decomposition.
+
 ## 0.2.0
 
 - Updated Libket to version 0.4.0, adding the `batch` and `live` execution modes.
