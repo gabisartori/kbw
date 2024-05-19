@@ -69,6 +69,11 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             continue_after_exp_value: true,
             continue_after_dump: true,
             decompose,
+            optimize_su2: std::env::var("KET_SU2_DECOMPOSITION_OPTIMIZATION")
+                .unwrap_or("0".to_string())
+                .parse()
+                .unwrap_or(false),
+            use_toffoli: false,
             live_quantum_execution: if live {
                 Some(Box::new(Self::new(num_qubits).unwrap()))
             } else {

@@ -18,12 +18,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = { git = "https://gitlab.com/quantum-ket/libket.git", tag = "v0.4.1" }
+libket = { git = "https://gitlab.com/quantum-ket/libket.git", branch = "ctrl_stack" }
 num = "0.4"
 rand = "0.8.5"
 rayon = "1.5.3"
 twox-hash = "1.6.3"
-itertools = "0.12.0"
+itertools = "0.13.0"
 log = "0.4.20"
 env_logger = "0.11.0"
 thiserror = "1.0.56"
