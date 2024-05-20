@@ -59,6 +59,18 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
     }
 
     pub fn configuration(num_qubits: usize, live: bool, decompose: bool) -> ket::Configuration {
+        let use_su2_optimization = !std::env::var("KET_DISABLE_SU2_DECOMPOSITION_OPTIMIZATION")
+            .unwrap_or("false".to_string())
+            .parse()
+            .unwrap_or(false)
+            && decompose;
+
+        let num_qubits = if use_su2_optimization {
+            num_qubits + 1
+        } else {
+            num_qubits
+        };
+
         ket::Configuration {
             allow_measure: true,
             allow_sample: true,
@@ -69,10 +81,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             continue_after_exp_value: true,
             continue_after_dump: true,
             decompose,
-            optimize_su2: std::env::var("KET_SU2_DECOMPOSITION_OPTIMIZATION")
-                .unwrap_or("0".to_string())
-                .parse()
-                .unwrap_or(false),
+            optimize_su2: use_su2_optimization,
             use_toffoli: false,
             live_quantum_execution: if live {
                 Some(Box::new(Self::new(num_qubits).unwrap()))
