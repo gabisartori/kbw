@@ -59,7 +59,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
     }
 
     pub fn configuration(num_qubits: usize, live: bool, decompose: bool) -> ket::Configuration {
-        let use_su2_optimization = !std::env::var("KET_DISABLE_SU2_DECOMPOSITION_OPTIMIZATION")
+        let use_su2_optimization = !std::env::var("KET_DISABLE_DECOMPOSITION_OPTIMIZATION")
             .unwrap_or("false".to_string())
             .parse()
             .unwrap_or(false)
