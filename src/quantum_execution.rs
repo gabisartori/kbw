@@ -123,32 +123,32 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
         match gate {
             ket::QuantumGate::RotationX(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rx(*theta, target, control),
-                Angle::PiFraction { top, bottom } => self.simulator.rx(
-                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                Angle::PiFraction { numer, denom } => self.simulator.rx(
+                    std::f64::consts::PI * *numer as f64 / *denom as f64,
                     target,
                     control,
                 ),
             },
             ket::QuantumGate::RotationY(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.ry(*theta, target, control),
-                Angle::PiFraction { top, bottom } => self.simulator.ry(
-                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                Angle::PiFraction { numer, denom } => self.simulator.ry(
+                    std::f64::consts::PI * *numer as f64 / *denom as f64,
                     target,
                     control,
                 ),
             },
             ket::QuantumGate::RotationZ(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.rz(*theta, target, control),
-                Angle::PiFraction { top, bottom } => self.simulator.rz(
-                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                Angle::PiFraction { numer, denom } => self.simulator.rz(
+                    std::f64::consts::PI * *numer as f64 / *denom as f64,
                     target,
                     control,
                 ),
             },
             ket::QuantumGate::Phase(angle) => match angle {
                 Angle::Scalar(theta) => self.simulator.phase(*theta, target, control),
-                Angle::PiFraction { top, bottom } => self.simulator.phase(
-                    std::f64::consts::PI * *top as f64 / *bottom as f64,
+                Angle::PiFraction { numer, denom } => self.simulator.phase(
+                    std::f64::consts::PI * *numer as f64 / *denom as f64,
                     target,
                     control,
                 ),
@@ -307,6 +307,7 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
                     let result = self.dump(qubits);
                     self.result.as_mut().unwrap().dumps.push(result);
                 }
+                ket::Instruction::Identity => continue,
             }
         }
     }
