@@ -58,32 +58,9 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
         })
     }
 
-    pub fn configuration(num_qubits: usize, live: bool, decompose: bool) -> ket::Configuration {
-        let use_su2_optimization = !std::env::var("KET_DISABLE_DECOMPOSITION_OPTIMIZATION")
-            .unwrap_or("false".to_string())
-            .parse()
-            .unwrap_or(false)
-            && decompose;
-
-        let num_qubits = if use_su2_optimization {
-            num_qubits + 1
-        } else {
-            num_qubits
-        };
-
+    pub fn configuration(num_qubits: usize, live: bool) -> ket::Configuration {
         ket::Configuration {
-            allow_measure: true,
-            allow_sample: true,
-            allow_exp_value: true,
-            allow_dump: true,
-            valid_after_measure: true,
-            continue_after_sample: true,
-            continue_after_exp_value: true,
-            continue_after_dump: true,
-            decompose,
-            optimize_su2: use_su2_optimization,
-            use_toffoli: false,
-            live_quantum_execution: if live {
+            live_execution: if live {
                 Some(Box::new(Self::new(num_qubits).unwrap()))
             } else {
                 None
@@ -95,6 +72,11 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
                 Some(Box::new(Self::new(num_qubits).unwrap()))
             },
             execution_timeout: None,
+            measure: ket::FeatureStatus::ValidAfter,
+            sample: ket::FeatureStatus::ValidAfter,
+            exp_value: ket::FeatureStatus::ValidAfter,
+            dump: ket::FeatureStatus::ValidAfter,
+            coupling_graph: None,
         }
     }
 }
@@ -105,10 +87,6 @@ impl<S: QuantumExecution> ket::LiveExecution for QubitManager<S> {
         self.qubit_map[target] = qubit_index;
 
         debug!("alloc target={}->{}", target, qubit_index);
-    }
-
-    fn free(&mut self, target: usize) {
-        self.qubit_stack.push(self.qubit_map[target]);
     }
 
     fn gate(&mut self, gate: &ket::QuantumGate, target: usize, control: &[usize]) {
@@ -274,7 +252,6 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
         for instruction in instructions {
             match instruction {
                 ket::Instruction::Alloc { target } => self.alloc(*target),
-                ket::Instruction::Free { target } => self.free(*target),
                 ket::Instruction::Gate {
                     gate,
                     target,
@@ -308,6 +285,11 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
                     self.result.as_mut().unwrap().dumps.push(result);
                 }
                 ket::Instruction::Identity => continue,
+                ket::Instruction::SWAP(a, b) => {
+                    self.gate(&ket::QuantumGate::PauliX, *a, &[*b]);
+                    self.gate(&ket::QuantumGate::PauliX, *b, &[*a]);
+                    self.gate(&ket::QuantumGate::PauliX, *a, &[*b]);
+                }
             }
         }
     }

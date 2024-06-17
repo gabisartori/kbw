@@ -65,16 +65,15 @@ pub extern "C" fn kbw_make_configuration(
     num_qubits: usize,
     live: bool,
     use_sparse: bool,
-    decompose: bool,
     result: &mut *mut ket::Configuration,
 ) -> i32 {
     if use_sparse {
         *result = Box::into_raw(Box::new(QubitManager::<Sparse>::configuration(
-            num_qubits, live, decompose,
+            num_qubits, live,
         )));
     } else {
         *result = Box::into_raw(Box::new(QubitManager::<Dense>::configuration(
-            num_qubits, live, decompose,
+            num_qubits, live,
         )));
     }
 

@@ -344,9 +344,7 @@ mod tests {
     #[test]
     fn dump_h2() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
-                2, true, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(2, true);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
@@ -364,9 +362,7 @@ mod tests {
     #[test]
     fn bell_state_live() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
-                2, true, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(2, true);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
@@ -392,9 +388,7 @@ mod tests {
     #[test]
     fn bell_state_batch() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
-                2, false, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(2, false);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
@@ -421,9 +415,7 @@ mod tests {
     fn bell_state_sample() -> std::result::Result<(), Box<dyn std::error::Error>> {
         crate::c_api::kbw_set_log_level(3);
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(
-                2, false, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::dense::Dense>::configuration(2, false);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;

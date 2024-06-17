@@ -351,9 +351,7 @@ mod tests {
     #[test]
     fn dump_h2() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
-                2, true, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
@@ -371,9 +369,7 @@ mod tests {
     #[test]
     fn bell_state() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(
-                2, true, false,
-            );
+            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
         let mut process = ket::Process::new(configuration);
         let qubit_a = process.allocate_qubit()?;
         let qubit_b = process.allocate_qubit()?;
