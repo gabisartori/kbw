@@ -344,6 +344,16 @@ impl QuantumExecution for Sparse {
         }
         Some(state_str)
     }
+
+    fn global_phase(&mut self, phase: f64) {
+        let current_state = self.get_current_state_mut();
+
+        let phase = Complex64::exp(phase * Complex64::i());
+
+        current_state.par_iter_mut().for_each(|(_, amp)| {
+            *amp *= phase;
+        });
+    }
 }
 #[cfg(test)]
 mod tests {

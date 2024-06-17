@@ -27,6 +27,7 @@ pub trait QuantumExecution {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> ket::DumpData;
+    fn global_phase(&mut self, phase: f64);
     fn debug_state(&self) -> Option<String> {
         None
     }
@@ -284,7 +285,11 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
                     let result = self.dump(qubits);
                     self.result.as_mut().unwrap().dumps.push(result);
                 }
-                ket::Instruction::Identity => continue,
+                ket::Instruction::Phase(phase) => {
+                    if phase.abs() > 1e-10 {
+                        self.simulator.global_phase(*phase);
+                    }
+                }
                 ket::Instruction::SWAP(a, b) => {
                     self.gate(&ket::QuantumGate::PauliX, *a, &[*b]);
                     self.gate(&ket::QuantumGate::PauliX, *b, &[*a]);

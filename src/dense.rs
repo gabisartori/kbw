@@ -336,6 +336,19 @@ impl QuantumExecution for Dense {
         }
         Some(state_str)
     }
+
+    fn global_phase(&mut self, phase: f64) {
+        let (current_state, next_state) = self.get_states();
+
+        let phase = Complex64::exp(phase * Complex64::i());
+
+        next_state
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(state, amp)| {
+                *amp = current_state[state] * phase;
+            });
+    }
 }
 
 #[cfg(test)]
