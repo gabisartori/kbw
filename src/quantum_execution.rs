@@ -77,7 +77,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
             sample: ket::FeatureStatus::ValidAfter,
             exp_value: ket::FeatureStatus::ValidAfter,
             dump: ket::FeatureStatus::ValidAfter,
-            coupling_graph: None,
+            qpu: None,
         }
     }
 }
@@ -290,11 +290,7 @@ impl<S: QuantumExecution> ket::BatchExecution for QubitManager<S> {
                         self.simulator.global_phase(*phase);
                     }
                 }
-                ket::Instruction::SWAP(a, b) => {
-                    self.gate(&ket::QuantumGate::PauliX, *a, &[*b]);
-                    self.gate(&ket::QuantumGate::PauliX, *b, &[*a]);
-                    self.gate(&ket::QuantumGate::PauliX, *a, &[*b]);
-                }
+                ket::Instruction::U2 { .. } => panic!("This gate should not be here"),
             }
         }
     }
