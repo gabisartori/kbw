@@ -7,6 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+##
+
+- Update Libket to version 0.5.0.
+
 ## 0.2.1
 
 - Update Libket to version 0.4.1.

@@ -60,24 +60,20 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
     }
 
     pub fn configuration(num_qubits: usize, live: bool) -> ket::Configuration {
+        let execution = if live {
+            ket::QuantumExecution::Live(Box::new(Self::new(num_qubits).unwrap()))
+        } else {
+            ket::QuantumExecution::Batch(Box::new(Self::new(num_qubits).unwrap()))
+        };
         ket::Configuration {
-            live_execution: if live {
-                Some(Box::new(Self::new(num_qubits).unwrap()))
-            } else {
-                None
-            },
-            num_qubits,
-            batch_execution: if live {
-                None
-            } else {
-                Some(Box::new(Self::new(num_qubits).unwrap()))
-            },
+            execution: Some(execution),
             execution_timeout: None,
             measure: ket::FeatureStatus::ValidAfter,
             sample: ket::FeatureStatus::ValidAfter,
             exp_value: ket::FeatureStatus::ValidAfter,
             dump: ket::FeatureStatus::ValidAfter,
             qpu: None,
+            num_qubits,
         }
     }
 }
