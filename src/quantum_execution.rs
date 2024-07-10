@@ -56,9 +56,10 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
 
     pub fn configuration(
         num_qubits: usize,
+        use_live: bool,
         coupling_graph: Option<Vec<(usize, usize)>>,
     ) -> Configuration {
-        let execution = if coupling_graph.is_none() {
+        let execution = if coupling_graph.is_none() && use_live {
             ket::execution::QuantumExecution::Live(Box::new(Self::new(num_qubits).unwrap()))
         } else {
             ket::execution::QuantumExecution::Batch(Box::new(Self::new(num_qubits).unwrap()))
@@ -217,6 +218,13 @@ impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
 
 impl<S: QuantumExecution> QubitManager<S> {
     fn submit_execution<Q: Qubit + Clone>(&mut self, instructions: &[Instruction<Q>]) {
+        let pb = indicatif::ProgressBar::new(instructions.len() as u64);
+        pb.set_style(
+            indicatif::ProgressStyle::with_template(
+                "KBW: {percent_precise}% {wide_bar} Time: {elapsed}/{duration} (ETA: {eta})",
+            )
+            .unwrap(),
+        );
         for instruction in instructions.iter().cloned() {
             match instruction {
                 Instruction::Gate {
@@ -262,7 +270,9 @@ impl<S: QuantumExecution> QubitManager<S> {
                 }
                 _ => {}
             }
+            pb.inc(1);
         }
+        pb.finish_and_clear();
     }
 }
 

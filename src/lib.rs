@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod bitwise;
-//pub mod c_api;
+pub mod c_api;
 pub mod convert;
 pub mod dense;
 pub mod error;

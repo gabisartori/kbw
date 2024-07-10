@@ -3,10 +3,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::{error::KBWError, DenseSimulator, SparseSimulator};
 use env_logger::Builder;
-use log::LevelFilter;
-
-use crate::{dense::Dense, error::KBWError, quantum_execution::QubitManager, sparse::Sparse};
+use ket::execution::*;
+use log::{trace, LevelFilter};
 
 #[no_mangle]
 pub extern "C" fn kbw_set_log_level(level: u32) -> i32 {
@@ -60,20 +60,37 @@ pub mod error {
     }
 }
 
+/// # Safety
 #[no_mangle]
-pub extern "C" fn kbw_make_configuration(
+pub unsafe extern "C" fn kbw_make_configuration(
     num_qubits: usize,
-    live: bool,
     use_sparse: bool,
-    result: &mut *mut ket::Configuration,
+    use_live: bool,
+    coupling_graph: *const (usize, usize),
+    coupling_graph_size: usize,
+    result: &mut *mut Configuration,
 ) -> i32 {
+    trace!("kbw_make_configuration(num_qubits={num_qubits}, use_sparse={use_sparse}, use_live={use_live}, coupling_graph={coupling_graph:?}, coupling_graph_size={coupling_graph_size})");
+
+    let coupling_graph = if coupling_graph.is_null() {
+        None
+    } else {
+        let coupling_graph =
+            unsafe { std::slice::from_raw_parts(coupling_graph, coupling_graph_size) };
+        Some(coupling_graph.to_vec())
+    };
+
     if use_sparse {
-        *result = Box::into_raw(Box::new(QubitManager::<Sparse>::configuration(
-            num_qubits, live,
+        *result = Box::into_raw(Box::new(SparseSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
         )));
     } else {
-        *result = Box::into_raw(Box::new(QubitManager::<Dense>::configuration(
-            num_qubits, live,
+        *result = Box::into_raw(Box::new(DenseSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
         )));
     }
 
