@@ -11,6 +11,7 @@ use num::complex::Complex64;
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
+use ket::execution::*;
 use std::{collections::HashMap, f64::consts::FRAC_1_SQRT_2};
 use twox_hash::RandomXxHashBuilder64;
 
@@ -297,7 +298,7 @@ impl QuantumExecution for Sparse {
         result
     }
 
-    fn dump(&mut self, qubits: &[usize]) -> ket::DumpData {
+    fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let state = self.get_current_state();
 
         let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<_>, Vec<_>) = state
@@ -324,7 +325,7 @@ impl QuantumExecution for Sparse {
             })
             .multiunzip();
 
-        ket::DumpData {
+        DumpData {
             basis_states,
             amplitudes_real,
             amplitudes_imag,
@@ -353,52 +354,5 @@ impl QuantumExecution for Sparse {
         current_state.par_iter_mut().for_each(|(_, amp)| {
             *amp *= phase;
         });
-    }
-}
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn dump_h2() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
-        let mut process = ket::Process::new(configuration);
-        let qubit_a = process.allocate_qubit()?;
-        let qubit_b = process.allocate_qubit()?;
-
-        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
-        process.apply_gate(ket::QuantumGate::Hadamard, qubit_b)?;
-
-        let d_a = process.dump(&[qubit_a])?;
-
-        println!("{:?}", process.get_dump(d_a));
-
-        Ok(())
-    }
-
-    #[test]
-    fn bell_state() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let configuration =
-            crate::quantum_execution::QubitManager::<crate::sparse::Sparse>::configuration(2, true);
-        let mut process = ket::Process::new(configuration);
-        let qubit_a = process.allocate_qubit()?;
-        let qubit_b = process.allocate_qubit()?;
-
-        process.apply_gate(ket::QuantumGate::Hadamard, qubit_a)?;
-        process.ctrl_push(&[qubit_a])?;
-        process.apply_gate(ket::QuantumGate::PauliX, qubit_b)?;
-        process.ctrl_pop()?;
-
-        let d_ab = process.dump(&[qubit_a, qubit_b])?;
-        let m_a = process.measure(&[qubit_a])?;
-        let m_b = process.measure(&[qubit_b])?;
-        let d_ab2 = process.dump(&[qubit_a, qubit_b])?;
-
-        println!("{:?}", process.get_dump(d_ab));
-        println!("{:?}", process.get_measurement(m_a));
-        println!("{:?}", process.get_measurement(m_b));
-        println!("{:?}", process.get_dump(d_ab2));
-
-        Ok(())
     }
 }

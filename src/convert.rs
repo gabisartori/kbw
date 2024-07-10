@@ -3,18 +3,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
-
+use ket::execution::DumpData;
 use num::complex::{Complex64, ComplexFloat};
 use rand::{distributions::WeightedIndex, prelude::Distribution, Rng};
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 pub(crate) struct DumpProbability {
     pub(crate) basis_states: Vec<Vec<u64>>,
     pub(crate) probabilities: Vec<f64>,
 }
 
-pub(crate) fn from_dump_to_prob(data: ket::DumpData) -> DumpProbability {
+pub(crate) fn from_dump_to_prob(data: DumpData) -> DumpProbability {
     let probabilities = data
         .amplitudes_real
         .par_iter()
@@ -30,7 +30,7 @@ pub(crate) fn from_dump_to_prob(data: ket::DumpData) -> DumpProbability {
 
 pub(crate) fn from_prob_to_shots<R: Rng>(
     data: DumpProbability,
-    shots: u64,
+    shots: usize,
     rng: &mut R,
 ) -> (Vec<u64>, Vec<u64>) {
     let mut count_map = HashMap::new();
