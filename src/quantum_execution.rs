@@ -76,7 +76,7 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
                 Some(QPU::new(
                     coupling_graph,
                     num_qubits,
-                    U2Gates::All,
+                    U2Gates::ZYZ,
                     U4Gate::CX,
                 ))
             } else {

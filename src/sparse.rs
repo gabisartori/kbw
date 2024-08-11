@@ -7,11 +7,11 @@ use crate::bitwise::*;
 use crate::error::Result;
 use crate::quantum_execution::QuantumExecution;
 use itertools::Itertools;
+use ket::execution::*;
 use num::complex::Complex64;
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
-use ket::execution::*;
 use std::{collections::HashMap, f64::consts::FRAC_1_SQRT_2};
 use twox_hash::RandomXxHashBuilder64;
 
