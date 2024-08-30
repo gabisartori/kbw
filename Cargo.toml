@@ -28,6 +28,10 @@ log = "0.4.20"
 env_logger = "0.11.5"
 thiserror = "1.0.63"
 indicatif = "0.17.8"
+build-info = { version = "0.0.38", default-features = false, features = [] }
+
+[build-dependencies]
+build-info-build = "0.0.38"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

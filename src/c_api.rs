@@ -96,3 +96,13 @@ pub unsafe extern "C" fn kbw_make_configuration(
 
     KBWError::Success.error_code()
 }
+
+const BUILD_INFO: &str = build_info::format!("{} v{} ({}) [{} {}]", $.crate_info.name, $.crate_info.version, $.version_control, $.compiler, $.target);
+
+#[no_mangle]
+pub extern "C" fn kbw_build_info(msg: &mut *const u8, size: &mut usize) -> i32 {
+    let bytes = BUILD_INFO.as_bytes();
+    *size = bytes.len();
+    *msg = bytes.as_ptr();
+    KBWError::Success.error_code()
+}
