@@ -5,7 +5,7 @@
 
 [package]
 name = "kbw"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>"]
 description = "Ket Bitwise Simulator"
 repository = "https://gitlab.com/quantum-ket/kbw"
@@ -26,7 +26,7 @@ twox-hash = "2.0.0"
 itertools = "0.13.0"
 log = "0.4.20"
 env_logger = "0.11.5"
-thiserror = "1.0.63"
+thiserror = "1.0.65"
 indicatif = "0.17.8"
 build-info = { version = "0.0.39", default-features = false, features = [] }
 

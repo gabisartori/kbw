@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
-##
+## 0.3.0
 
 - Update Libket to version 0.5.0.
 - Added DenseV2.
