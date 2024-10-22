@@ -34,6 +34,9 @@ pub enum KBWError {
 
     #[error("The data type is undefined.")]
     UndefinedDataType,
+
+    #[error("The simulator is undefined.")]
+    InvalidSimulator,
 }
 
 /// Result type for KBW library functions.

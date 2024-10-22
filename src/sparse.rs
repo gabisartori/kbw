@@ -13,9 +13,9 @@ use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::{collections::HashMap, f64::consts::FRAC_1_SQRT_2};
-use twox_hash::RandomXxHashBuilder64;
+use twox_hash::xxhash64::RandomState;
 
-type StateMap = HashMap<Vec<u64>, Complex64, RandomXxHashBuilder64>;
+type StateMap = HashMap<Vec<u64>, Complex64, RandomState>;
 
 pub struct Sparse {
     state_0: StateMap,
@@ -330,29 +330,5 @@ impl QuantumExecution for Sparse {
             amplitudes_real,
             amplitudes_imag,
         }
-    }
-
-    fn debug_state(&self) -> Option<String> {
-        let states = self.get_current_state();
-        let mut state_str = String::new();
-        for (state, amp) in states {
-            let state = state
-                .iter()
-                .map(|x| format!("{:064b}", x))
-                .reduce(|a, b| a + &b)
-                .unwrap_or_default();
-            state_str.push_str(&format!("{:?}: {:?}\n", state, amp));
-        }
-        Some(state_str)
-    }
-
-    fn global_phase(&mut self, phase: f64) {
-        let current_state = self.get_current_state_mut();
-
-        let phase = Complex64::exp(phase * Complex64::i());
-
-        current_state.par_iter_mut().for_each(|(_, amp)| {
-            *amp *= phase;
-        });
     }
 }

@@ -3,10 +3,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{error::KBWError, DenseSimulator, SparseSimulator};
+use crate::{error::KBWError, DenseSimulator, DenseV2Simulator, SparseSimulator};
 use env_logger::Builder;
 use ket::execution::*;
-use log::{trace, LevelFilter};
+use log::LevelFilter;
 
 #[no_mangle]
 pub extern "C" fn kbw_set_log_level(level: u32) -> i32 {
@@ -64,14 +64,12 @@ pub mod error {
 #[no_mangle]
 pub unsafe extern "C" fn kbw_make_configuration(
     num_qubits: usize,
-    use_sparse: bool,
+    simulator: i32,
     use_live: bool,
     coupling_graph: *const (usize, usize),
     coupling_graph_size: usize,
     result: &mut *mut Configuration,
 ) -> i32 {
-    trace!("kbw_make_configuration(num_qubits={num_qubits}, use_sparse={use_sparse}, use_live={use_live}, coupling_graph={coupling_graph:?}, coupling_graph_size={coupling_graph_size})");
-
     let coupling_graph = if coupling_graph.is_null() {
         None
     } else {
@@ -80,19 +78,12 @@ pub unsafe extern "C" fn kbw_make_configuration(
         Some(coupling_graph.to_vec())
     };
 
-    if use_sparse {
-        *result = Box::into_raw(Box::new(SparseSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-        )));
-    } else {
-        *result = Box::into_raw(Box::new(DenseSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-        )));
-    }
+    *result = Box::into_raw(Box::new(match simulator {
+        0 => DenseSimulator::configuration(num_qubits, use_live, coupling_graph),
+        1 => SparseSimulator::configuration(num_qubits, use_live, coupling_graph),
+        2 => DenseV2Simulator::configuration(num_qubits, use_live, coupling_graph),
+        _ => return KBWError::InvalidSimulator.error_code(),
+    }));
 
     KBWError::Success.error_code()
 }

@@ -28,10 +28,6 @@ pub trait QuantumExecution {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
-    fn global_phase(&mut self, phase: f64);
-    fn debug_state(&self) -> Option<String> {
-        None
-    }
 }
 
 pub struct QubitManager<S: QuantumExecution> {

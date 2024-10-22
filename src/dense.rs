@@ -324,30 +324,4 @@ impl QuantumExecution for Dense {
             amplitudes_imag,
         }
     }
-
-    fn debug_state(&self) -> Option<String> {
-        let state = self.get_current_state();
-        let mut state_str = String::new();
-        state_str.push_str("State:\n");
-        for (index, amp) in state.iter().enumerate() {
-            if amp.norm() < 1e-15 {
-                continue;
-            }
-            state_str.push_str(&format!("{:032b}: {:?}\n", index, amp));
-        }
-        Some(state_str)
-    }
-
-    fn global_phase(&mut self, phase: f64) {
-        let (current_state, next_state) = self.get_states();
-
-        let phase = Complex64::exp(phase * Complex64::i());
-
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                *amp = current_state[state] * phase;
-            });
-    }
 }
