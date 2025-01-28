@@ -3,9 +3,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::bitwise::*;
 use crate::error::Result;
 use crate::quantum_execution::QuantumExecution;
+use crate::{bitwise::*, quantum_execution::ExecutionFeatures};
 use itertools::Itertools;
 use ket::execution::*;
 use num::complex::Complex64;
@@ -330,5 +330,31 @@ impl QuantumExecution for Sparse {
             amplitudes_real,
             amplitudes_imag,
         }
+    }
+}
+
+impl ExecutionFeatures for Sparse {
+    fn feature_measure() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_sample() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_exp_value() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_dump() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_need_decomposition() -> bool {
+        false
+    }
+
+    fn feature_allow_live() -> bool {
+        true
     }
 }

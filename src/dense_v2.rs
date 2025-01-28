@@ -4,7 +4,7 @@
 
 use crate::bitwise::*;
 use crate::error::{KBWError, Result};
-use crate::quantum_execution::QuantumExecution;
+use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use itertools::Itertools;
 use ket::execution::*;
 use log::error;
@@ -225,5 +225,31 @@ impl QuantumExecution for DenseV2 {
             amplitudes_real,
             amplitudes_imag,
         }
+    }
+}
+
+impl ExecutionFeatures for DenseV2 {
+    fn feature_measure() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_sample() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_exp_value() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_dump() -> FeatureStatus {
+        FeatureStatus::ValidAfter
+    }
+
+    fn feature_need_decomposition() -> bool {
+        false
+    }
+
+    fn feature_allow_live() -> bool {
+        true
     }
 }

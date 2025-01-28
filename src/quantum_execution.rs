@@ -28,6 +28,62 @@ pub trait QuantumExecution {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
+
+    fn exp_value<Q: Qubit>(&mut self, hamiltonian: &Hamiltonian<Q>) -> f64 {
+        hamiltonian
+            .products
+            .iter()
+            .map(|pauli_terms| {
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
+                    Pauli::PauliY => {
+                        self.phase(-FRAC_PI_2, term.qubit.index(), &[]);
+                        self.hadamard(term.qubit.index(), &[]);
+                    }
+                    Pauli::PauliZ => {}
+                });
+
+                let dump_data = self.dump(
+                    &pauli_terms
+                        .iter()
+                        .map(|term| term.qubit.index())
+                        .collect_vec(),
+                );
+                let probabilities = from_dump_to_prob(dump_data);
+
+                let result: f64 = probabilities
+                    .basis_states
+                    .iter()
+                    .zip(probabilities.probabilities.iter())
+                    .map(|(state, prob)| {
+                        let parity = if state
+                            .iter()
+                            .fold(0, |acc, bit| acc + bit.count_ones())
+                            .is_even()
+                        {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        *prob * parity
+                    })
+                    .sum();
+
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
+                    Pauli::PauliY => {
+                        self.hadamard(term.qubit.index(), &[]);
+                        self.phase(FRAC_PI_2, term.qubit.index(), &[])
+                    }
+                    Pauli::PauliZ => {}
+                });
+
+                result
+            })
+            .zip(&hamiltonian.coefficients)
+            .map(|(result, coefficient)| result * *coefficient)
+            .sum()
+    }
 }
 
 pub struct QubitManager<S: QuantumExecution> {
@@ -36,7 +92,16 @@ pub struct QubitManager<S: QuantumExecution> {
     results: ResultData,
 }
 
-impl<S: QuantumExecution + 'static> QubitManager<S> {
+pub trait ExecutionFeatures {
+    fn feature_measure() -> FeatureStatus;
+    fn feature_sample() -> FeatureStatus;
+    fn feature_exp_value() -> FeatureStatus;
+    fn feature_dump() -> FeatureStatus;
+    fn feature_need_decomposition() -> bool;
+    fn feature_allow_live() -> bool;
+}
+
+impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
     pub fn new(num_qubits: usize) -> Result<Self> {
         let seed = std::env::var("KBW_SEED")
             .unwrap_or_default()
@@ -55,17 +120,17 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
         use_live: bool,
         coupling_graph: Option<Vec<(usize, usize)>>,
     ) -> Configuration {
-        let execution = if coupling_graph.is_none() && use_live {
+        let execution = if coupling_graph.is_none() && use_live && S::feature_allow_live() {
             ket::execution::QuantumExecution::Live(Box::new(Self::new(num_qubits).unwrap()))
         } else {
             ket::execution::QuantumExecution::Batch(Box::new(Self::new(num_qubits).unwrap()))
         };
 
         Configuration {
-            measure: FeatureStatus::ValidAfter,
-            sample: FeatureStatus::ValidAfter,
-            exp_value: FeatureStatus::ValidAfter,
-            dump: FeatureStatus::ValidAfter,
+            measure: S::feature_measure(),
+            sample: S::feature_sample(),
+            exp_value: S::feature_exp_value(),
+            dump: S::feature_dump(),
             execution: Some(execution),
             num_qubits,
             qpu: if coupling_graph.is_some() {
@@ -75,6 +140,8 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
                     U2Gates::ZYZ,
                     U4Gate::CX,
                 ))
+            } else if S::feature_need_decomposition() {
+                Some(QPU::new(None, num_qubits, U2Gates::ZYZ, U4Gate::CX))
             } else {
                 None
             },
@@ -114,59 +181,7 @@ impl<S: QuantumExecution> QubitManager<S> {
     }
 
     fn exp_value<Q: Qubit>(&mut self, hamiltonian: &Hamiltonian<Q>) -> f64 {
-        hamiltonian
-            .products
-            .iter()
-            .map(|pauli_terms| {
-                pauli_terms.iter().for_each(|term| match term.pauli {
-                    Pauli::PauliX => self.simulator.hadamard(term.qubit.index(), &[]),
-                    Pauli::PauliY => {
-                        self.simulator.phase(-FRAC_PI_2, term.qubit.index(), &[]);
-                        self.simulator.hadamard(term.qubit.index(), &[]);
-                    }
-                    Pauli::PauliZ => {}
-                });
-
-                let dump_data = self.simulator.dump(
-                    &pauli_terms
-                        .iter()
-                        .map(|term| term.qubit.index())
-                        .collect_vec(),
-                );
-                let probabilities = from_dump_to_prob(dump_data);
-
-                let result: f64 = probabilities
-                    .basis_states
-                    .iter()
-                    .zip(probabilities.probabilities.iter())
-                    .map(|(state, prob)| {
-                        let parity = if state
-                            .iter()
-                            .fold(0, |acc, bit| acc + bit.count_ones())
-                            .is_even()
-                        {
-                            1.0
-                        } else {
-                            -1.0
-                        };
-                        *prob * parity
-                    })
-                    .sum();
-
-                pauli_terms.iter().for_each(|term| match term.pauli {
-                    Pauli::PauliX => self.simulator.hadamard(term.qubit.index(), &[]),
-                    Pauli::PauliY => {
-                        self.simulator.hadamard(term.qubit.index(), &[]);
-                        self.simulator.phase(FRAC_PI_2, term.qubit.index(), &[])
-                    }
-                    Pauli::PauliZ => {}
-                });
-
-                result
-            })
-            .zip(&hamiltonian.coefficients)
-            .map(|(result, coefficient)| result * *coefficient)
-            .sum()
+        self.simulator.exp_value(hamiltonian)
     }
 
     fn sample<Q: Qubit>(&mut self, qubits: &[Q], shots: usize) -> Sample {
