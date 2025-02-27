@@ -108,7 +108,7 @@ impl QuantumExecution for DenseV2 {
         );
     }
 
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize], _: bool) {
         let phase = Complex64::exp(lambda * Complex64::i());
 
         self.gate(
@@ -120,7 +120,7 @@ impl QuantumExecution for DenseV2 {
         );
     }
 
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
         let sin_theta_2 = -Complex64::i() * f64::sin(theta / 2.0);
 
@@ -136,7 +136,7 @@ impl QuantumExecution for DenseV2 {
         );
     }
 
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
         let p_sin_theta_2 = Complex64::from(f64::sin(theta / 2.0));
         let m_sin_theta_2 = -p_sin_theta_2;
@@ -153,7 +153,7 @@ impl QuantumExecution for DenseV2 {
         );
     }
 
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let phase_0 = Complex64::exp(-theta / 2.0 * Complex64::i());
         let phase_1 = Complex64::exp(theta / 2.0 * Complex64::i());
 
@@ -256,5 +256,9 @@ impl ExecutionFeatures for DenseV2 {
 
     fn feature_allow_live() -> bool {
         true
+    }
+
+    fn supports_gradient() -> bool {
+        false
     }
 }

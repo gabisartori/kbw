@@ -149,7 +149,7 @@ impl QuantumExecution for Dense {
             });
     }
 
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize], _: bool) {
         let (current_state, next_state) = self.get_states();
 
         let phase = Complex64::exp(lambda * Complex64::i());
@@ -166,7 +166,7 @@ impl QuantumExecution for Dense {
             });
     }
 
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let (current_state, next_state) = self.get_states();
 
         let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
@@ -200,7 +200,7 @@ impl QuantumExecution for Dense {
             });
     }
 
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let (current_state, next_state) = self.get_states();
 
         let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
@@ -240,7 +240,7 @@ impl QuantumExecution for Dense {
             });
     }
 
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize], _: bool) {
         let (current_state, next_state) = self.get_states();
 
         let phase_0 = Complex64::exp(-theta / 2.0 * Complex64::i());
@@ -360,5 +360,9 @@ impl ExecutionFeatures for Dense {
 
     fn feature_allow_live() -> bool {
         true
+    }
+
+    fn supports_gradient() -> bool {
+        false
     }
 }

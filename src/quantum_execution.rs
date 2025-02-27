@@ -23,12 +23,16 @@ pub trait QuantumExecution {
     fn pauli_y(&mut self, target: usize, control: &[usize]);
     fn pauli_z(&mut self, target: usize, control: &[usize]);
     fn hadamard(&mut self, target: usize, control: &[usize]);
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]);
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize]);
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize]);
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize], gradient: bool);
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
+
+    fn gradients(&mut self) -> Option<Vec<f64>> {
+        None
+    }
 
     fn sample<R: Rng>(&mut self, qubits: &[usize], shots: usize, rng: &mut R) -> Sample {
         let data = self.dump(qubits);
@@ -43,7 +47,7 @@ pub trait QuantumExecution {
                 pauli_terms.iter().for_each(|term| match term.pauli {
                     Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
                     Pauli::PauliY => {
-                        self.phase(-FRAC_PI_2, term.qubit.index(), &[]);
+                        self.phase(-FRAC_PI_2, term.qubit.index(), &[], false);
                         self.hadamard(term.qubit.index(), &[]);
                     }
                     Pauli::PauliZ => {}
@@ -79,7 +83,7 @@ pub trait QuantumExecution {
                     Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
                     Pauli::PauliY => {
                         self.hadamard(term.qubit.index(), &[]);
-                        self.phase(FRAC_PI_2, term.qubit.index(), &[])
+                        self.phase(FRAC_PI_2, term.qubit.index(), &[], false)
                     }
                     Pauli::PauliZ => {}
                 });
@@ -108,6 +112,7 @@ pub trait ExecutionFeatures {
     fn feature_dump() -> FeatureStatus;
     fn feature_need_decomposition() -> bool;
     fn feature_allow_live() -> bool;
+    fn supports_gradient() -> bool;
 }
 
 impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
@@ -176,19 +181,30 @@ impl<S: QuantumExecution> QubitManager<S> {
         let control = &control.iter().map(|x| x.index()).collect_vec();
 
         match gate {
-            QuantumGate::RotationX(theta) => {
-                self.simulator.rx(self.get_param(theta), target, control)
-            }
-            QuantumGate::RotationY(theta) => {
-                self.simulator.ry(self.get_param(theta), target, control)
-            }
-            QuantumGate::RotationZ(theta) => {
-                self.simulator.rz(self.get_param(theta), target, control)
-            }
-            QuantumGate::Phase(lambda) => {
-                self.simulator
-                    .phase(self.get_param(lambda), target, control)
-            }
+            QuantumGate::RotationX(theta) => self.simulator.rx(
+                self.get_param(theta),
+                target,
+                control,
+                matches!(theta, Param::Ref { .. }),
+            ),
+            QuantumGate::RotationY(theta) => self.simulator.ry(
+                self.get_param(theta),
+                target,
+                control,
+                matches!(theta, Param::Ref { .. }),
+            ),
+            QuantumGate::RotationZ(theta) => self.simulator.rz(
+                self.get_param(theta),
+                target,
+                control,
+                matches!(theta, Param::Ref { .. }),
+            ),
+            QuantumGate::Phase(lambda) => self.simulator.phase(
+                self.get_param(lambda),
+                target,
+                control,
+                matches!(lambda, Param::Ref { .. }),
+            ),
             QuantumGate::Hadamard => self.simulator.hadamard(target, control),
             QuantumGate::PauliX => self.simulator.pauli_x(target, control),
             QuantumGate::PauliY => self.simulator.pauli_y(target, control),
@@ -255,7 +271,7 @@ impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
     }
 }
 
-impl<S: QuantumExecution> QubitManager<S> {
+impl<S: QuantumExecution + ExecutionFeatures> QubitManager<S> {
     fn submit_execution<Q: Qubit + Clone>(&mut self, instructions: &[Instruction<Q>]) {
         let pb = indicatif::ProgressBar::new(instructions.len() as u64);
         pb.set_style(
@@ -312,10 +328,13 @@ impl<S: QuantumExecution> QubitManager<S> {
             pb.inc(1);
         }
         pb.finish_and_clear();
+        if S::supports_gradient() {
+            self.results.gradients = self.simulator.gradients();
+        }
     }
 }
 
-impl<S: QuantumExecution> BatchExecution for QubitManager<S> {
+impl<S: QuantumExecution + ExecutionFeatures> BatchExecution for QubitManager<S> {
     fn submit_execution(
         &mut self,
         logical_circuit: &[Instruction<LogicalQubit>],
