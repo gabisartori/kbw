@@ -10,7 +10,7 @@ use itertools::Itertools;
 use ket::execution::*;
 use log::error;
 use num::{complex::Complex64, Zero};
-use rand::distributions::WeightedIndex;
+use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -19,6 +19,7 @@ pub struct Dense {
     state_0: Vec<Complex64>,
     state_1: Vec<Complex64>,
     state: bool,
+    num_states: usize,
 }
 
 impl Dense {
@@ -59,6 +60,7 @@ impl QuantumExecution for Dense {
             state: true,
             state_0,
             state_1,
+            num_states,
         })
     }
 
@@ -323,6 +325,15 @@ impl QuantumExecution for Dense {
             amplitudes_real,
             amplitudes_imag,
         }
+    }
+
+    fn clear(&mut self) {
+        self.state_0.clear();
+        self.state_1.clear();
+        self.state_0.resize(self.num_states, Complex64::zero());
+        self.state_1.resize(self.num_states, Complex64::zero());
+        self.state_0[0] = Complex64::new(1.0, 0.0);
+        self.state = true;
     }
 }
 

@@ -9,7 +9,7 @@ use itertools::Itertools;
 use ket::execution::*;
 use log::error;
 use num::{complex::Complex64, Zero};
-use rand::distributions::WeightedIndex;
+use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -225,6 +225,11 @@ impl QuantumExecution for DenseV2 {
             amplitudes_real,
             amplitudes_imag,
         }
+    }
+
+    fn clear(&mut self) {
+        self.0.fill(Complex64::zero());
+        self.0[0] = Complex64::new(1.0, 0.0);
     }
 }
 

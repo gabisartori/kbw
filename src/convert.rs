@@ -5,7 +5,10 @@
 
 use ket::execution::DumpData;
 use num::complex::{Complex64, ComplexFloat};
-use rand::{distributions::WeightedIndex, prelude::Distribution, Rng};
+use rand::{
+    distr::{weighted::WeightedIndex, Distribution},
+    Rng,
+};
 use rayon::prelude::*;
 use std::collections::HashMap;
 

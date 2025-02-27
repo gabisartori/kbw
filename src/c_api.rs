@@ -68,6 +68,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
     use_live: bool,
     coupling_graph: *const (usize, usize),
     coupling_graph_size: usize,
+    gradient: bool,
     result: &mut *mut Configuration,
 ) -> i32 {
     let coupling_graph = if coupling_graph.is_null() {
@@ -79,9 +80,36 @@ pub unsafe extern "C" fn kbw_make_configuration(
     };
 
     *result = Box::into_raw(Box::new(match simulator {
-        0 => DenseSimulator::configuration(num_qubits, use_live, coupling_graph),
-        1 => SparseSimulator::configuration(num_qubits, use_live, coupling_graph),
-        2 => DenseV2Simulator::configuration(num_qubits, use_live, coupling_graph),
+        0 => DenseSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            if gradient {
+                GradientStatus::ParameterShift
+            } else {
+                GradientStatus::Disable
+            },
+        ),
+        1 => SparseSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            if gradient {
+                GradientStatus::ParameterShift
+            } else {
+                GradientStatus::Disable
+            },
+        ),
+        2 => DenseV2Simulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            if gradient {
+                GradientStatus::ParameterShift
+            } else {
+                GradientStatus::Disable
+            },
+        ),
         _ => return KBWError::InvalidSimulator.error_code(),
     }));
 

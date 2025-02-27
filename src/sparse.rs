@@ -9,7 +9,7 @@ use crate::{bitwise::*, quantum_execution::ExecutionFeatures};
 use itertools::Itertools;
 use ket::execution::*;
 use num::complex::Complex64;
-use rand::distributions::WeightedIndex;
+use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::{collections::HashMap, f64::consts::FRAC_1_SQRT_2};
@@ -21,6 +21,7 @@ pub struct Sparse {
     state_0: StateMap,
     state_1: StateMap,
     state: bool,
+    num_states: usize,
 }
 
 impl Sparse {
@@ -64,6 +65,7 @@ impl QuantumExecution for Sparse {
             state_0,
             state_1: StateMap::default(),
             state: true,
+            num_states,
         })
     }
 
@@ -330,6 +332,16 @@ impl QuantumExecution for Sparse {
             amplitudes_real,
             amplitudes_imag,
         }
+    }
+
+    fn clear(&mut self) {
+        self.state_0 = StateMap::default();
+        self.state_1 = StateMap::default();
+
+        let zero = vec![0; self.num_states];
+
+        self.state_0.insert(zero, Complex64::new(1.0, 0.0));
+        self.state = true;
     }
 }
 
