@@ -23,10 +23,10 @@ pub trait QuantumExecution {
     fn pauli_y(&mut self, target: usize, control: &[usize]);
     fn pauli_z(&mut self, target: usize, control: &[usize]);
     fn hadamard(&mut self, target: usize, control: &[usize]);
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize], gradient: bool);
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize], gradient: bool);
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]);
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize]);
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize]);
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
 
@@ -47,7 +47,7 @@ pub trait QuantumExecution {
                 pauli_terms.iter().for_each(|term| match term.pauli {
                     Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
                     Pauli::PauliY => {
-                        self.phase(-FRAC_PI_2, term.qubit.index(), &[], false);
+                        self.phase(-FRAC_PI_2, term.qubit.index(), &[]);
                         self.hadamard(term.qubit.index(), &[]);
                     }
                     Pauli::PauliZ => {}
@@ -83,7 +83,7 @@ pub trait QuantumExecution {
                     Pauli::PauliX => self.hadamard(term.qubit.index(), &[]),
                     Pauli::PauliY => {
                         self.hadamard(term.qubit.index(), &[]);
-                        self.phase(FRAC_PI_2, term.qubit.index(), &[], false)
+                        self.phase(FRAC_PI_2, term.qubit.index(), &[])
                     }
                     Pauli::PauliZ => {}
                 });
@@ -181,30 +181,19 @@ impl<S: QuantumExecution> QubitManager<S> {
         let control = &control.iter().map(|x| x.index()).collect_vec();
 
         match gate {
-            QuantumGate::RotationX(theta) => self.simulator.rx(
-                self.get_param(theta),
-                target,
-                control,
-                matches!(theta, Param::Ref { .. }),
-            ),
-            QuantumGate::RotationY(theta) => self.simulator.ry(
-                self.get_param(theta),
-                target,
-                control,
-                matches!(theta, Param::Ref { .. }),
-            ),
-            QuantumGate::RotationZ(theta) => self.simulator.rz(
-                self.get_param(theta),
-                target,
-                control,
-                matches!(theta, Param::Ref { .. }),
-            ),
-            QuantumGate::Phase(lambda) => self.simulator.phase(
-                self.get_param(lambda),
-                target,
-                control,
-                matches!(lambda, Param::Ref { .. }),
-            ),
+            QuantumGate::RotationX(theta) => {
+                self.simulator.rx(self.get_param(theta), target, control)
+            }
+            QuantumGate::RotationY(theta) => {
+                self.simulator.ry(self.get_param(theta), target, control)
+            }
+            QuantumGate::RotationZ(theta) => {
+                self.simulator.rz(self.get_param(theta), target, control)
+            }
+            QuantumGate::Phase(lambda) => {
+                self.simulator
+                    .phase(self.get_param(lambda), target, control)
+            }
             QuantumGate::Hadamard => self.simulator.hadamard(target, control),
             QuantumGate::PauliX => self.simulator.pauli_x(target, control),
             QuantumGate::PauliY => self.simulator.pauli_y(target, control),
