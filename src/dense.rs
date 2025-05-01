@@ -8,13 +8,16 @@ use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use itertools::Itertools;
 use ket::execution::*;
+use ket::process::DumpData;
 use log::error;
 use num::{complex::Complex64, Zero};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::f64::consts::FRAC_1_SQRT_2;
 
+#[derive(Serialize, Deserialize)]
 pub struct Dense {
     state_0: Vec<Complex64>,
     state_1: Vec<Complex64>,
@@ -338,20 +341,20 @@ impl QuantumExecution for Dense {
 }
 
 impl ExecutionFeatures for Dense {
-    fn feature_measure() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_measure() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_sample() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_sample() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_exp_value() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_exp_value() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_dump() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_dump() -> Capability {
+        Capability::Advanced
     }
 
     fn feature_need_decomposition() -> bool {

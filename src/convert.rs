@@ -3,7 +3,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use ket::execution::DumpData;
+use ket::process::DumpData;
 use num::complex::{Complex64, ComplexFloat};
 use rand::{
     distr::{weighted::WeightedIndex, Distribution},

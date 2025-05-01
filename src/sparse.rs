@@ -8,15 +8,18 @@ use crate::quantum_execution::QuantumExecution;
 use crate::{bitwise::*, quantum_execution::ExecutionFeatures};
 use itertools::Itertools;
 use ket::execution::*;
+use ket::process::DumpData;
 use num::complex::Complex64;
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, f64::consts::FRAC_1_SQRT_2};
 use twox_hash::xxhash64::RandomState;
 
 type StateMap = HashMap<Vec<u64>, Complex64, RandomState>;
 
+#[derive(Serialize, Deserialize)]
 pub struct Sparse {
     state_0: StateMap,
     state_1: StateMap,
@@ -346,20 +349,20 @@ impl QuantumExecution for Sparse {
 }
 
 impl ExecutionFeatures for Sparse {
-    fn feature_measure() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_measure() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_sample() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_sample() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_exp_value() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_exp_value() -> Capability {
+        Capability::Advanced
     }
 
-    fn feature_dump() -> FeatureStatus {
-        FeatureStatus::ValidAfter
+    fn feature_dump() -> Capability {
+        Capability::Advanced
     }
 
     fn feature_need_decomposition() -> bool {

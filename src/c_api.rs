@@ -5,7 +5,7 @@
 
 use crate::{error::KBWError, DenseSimulator, DenseV2Simulator, SparseSimulator};
 use env_logger::Builder;
-use ket::execution::*;
+use ket::prelude::ExecutionTarget;
 use log::LevelFilter;
 
 #[no_mangle]
@@ -69,7 +69,9 @@ pub unsafe extern "C" fn kbw_make_configuration(
     coupling_graph: *const (usize, usize),
     coupling_graph_size: usize,
     gradient: bool,
-    result: &mut *mut Configuration,
+    sample_base: usize,
+    classical_shadows: *const usize,
+    result: &mut *mut (ExecutionTarget, Option<ket::execution::QuantumExecution>),
 ) -> i32 {
     let coupling_graph = if coupling_graph.is_null() {
         None
@@ -79,36 +81,44 @@ pub unsafe extern "C" fn kbw_make_configuration(
         Some(coupling_graph.to_vec())
     };
 
+    let classical_shadows = if !classical_shadows.is_null() {
+        let cs = unsafe { std::slice::from_raw_parts(classical_shadows, 5) };
+
+        Some(((cs[0] as u8, cs[1] as u8, cs[2] as u8), cs[3], cs[4]))
+    } else {
+        None
+    };
+
+    let sample_base = if sample_base == 0 {
+        None
+    } else {
+        Some(sample_base)
+    };
+
     *result = Box::into_raw(Box::new(match simulator {
         0 => DenseSimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
-            if gradient {
-                GradientStatus::ParameterShift
-            } else {
-                GradientStatus::Disable
-            },
+            sample_base,
+            classical_shadows,
+            gradient,
         ),
         1 => SparseSimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
-            if gradient {
-                GradientStatus::ParameterShift
-            } else {
-                GradientStatus::Disable
-            },
+            sample_base,
+            classical_shadows,
+            gradient,
         ),
         2 => DenseV2Simulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
-            if gradient {
-                GradientStatus::ParameterShift
-            } else {
-                GradientStatus::Disable
-            },
+            sample_base,
+            classical_shadows,
+            gradient,
         ),
         _ => return KBWError::InvalidSimulator.error_code(),
     }));
