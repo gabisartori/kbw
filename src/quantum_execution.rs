@@ -147,13 +147,13 @@ impl<S: QuantumExecution + ExecutionFeatures + Serialize + DeserializeOwned + 's
         };
 
         let execution_protocol = if let Some(sample_base) = sample_base {
-            ExecutionProtocol::SampleBased(Some(ExpValueStrategy::DirectSample(sample_base)))
+            ExecutionProtocol::SampleBased(ExpValueStrategy::DirectSample(sample_base))
         } else if let Some(classical_shadows) = classical_shadows {
-            ExecutionProtocol::SampleBased(Some(ExpValueStrategy::ClassicalShadows {
+            ExecutionProtocol::SampleBased(ExpValueStrategy::ClassicalShadows {
                 bias: classical_shadows.0,
                 samples: classical_shadows.1,
                 shots: classical_shadows.2,
-            }))
+            })
         } else {
             ExecutionProtocol::ManagedByTarget {
                 measure: S::feature_measure(),

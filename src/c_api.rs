@@ -83,7 +83,6 @@ pub unsafe extern "C" fn kbw_make_configuration(
 
     let classical_shadows = if !classical_shadows.is_null() {
         let cs = unsafe { std::slice::from_raw_parts(classical_shadows, 5) };
-
         Some(((cs[0] as u8, cs[1] as u8, cs[2] as u8), cs[3], cs[4]))
     } else {
         None
