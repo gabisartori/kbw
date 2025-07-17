@@ -7,6 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+## 0.4.0
+
+- Update Libket to version 0.6.0
+- Moved expectation value calculation and sampling to the `QuantumExecution` trait.
+
 ## 0.3.0
 
 - Update Libket to version 0.5.0.
