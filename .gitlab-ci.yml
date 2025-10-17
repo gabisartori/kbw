@@ -5,12 +5,13 @@
 stages:
   - lint
   - test
+  - build
+  - deploy
 
 cargo-clippy:
-  image: rust:1.88
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.88
   stage: lint
   script:
-    - rustup component add clippy
     - cargo clippy --all-features -- -D warnings
 
 reuse:
@@ -21,7 +22,37 @@ reuse:
     - reuse lint
 
 cargo-test:
-  image: rust:1.88
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.88
   stage: test
   script:
     - cargo test --all-features
+
+linux-build:
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.88
+  stage: build
+  script:
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/libkbw.so
+
+windows-build:
+  image: registry.gitlab.com/quantum-ket/ket-building-images:windows-1.88
+  stage: build
+  script:
+    - cargo build --release --target x86_64-pc-windows-gnu
+  artifacts:
+    paths:
+      - target/x86_64-pc-windows-gnu/release/libkbw.dll
+
+publish:
+  stage: deploy
+  script:
+    - |
+      curl --location --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+           --upload-file target/release/libkbw.so \
+           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kbw/${CI_COMMIT_SHORT_SHA}/libkbw.so"
+    - |
+      curl --location --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+           --upload-file target/x86_64-pc-windows-gnu/release/libkbw.dll \
+           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kbw/${CI_COMMIT_SHORT_SHA}/libkbw.dll"
