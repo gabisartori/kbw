@@ -43,7 +43,7 @@ windows-build:
     - cargo build --release --target x86_64-pc-windows-gnu
   artifacts:
     paths:
-      - target/x86_64-pc-windows-gnu/release/libkbw.dll
+      - target/x86_64-pc-windows-gnu/release/kbw.dll
 
 publish:
   stage: deploy
@@ -54,5 +54,5 @@ publish:
            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kbw/${CI_COMMIT_SHORT_SHA}/libkbw.so"
     - |
       curl --location --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
-           --upload-file target/x86_64-pc-windows-gnu/release/libkbw.dll \
-           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kbw/${CI_COMMIT_SHORT_SHA}/libkbw.dll"
+           --upload-file target/x86_64-pc-windows-gnu/release/kbw.dll \
+           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/kbw/${CI_COMMIT_SHORT_SHA}/kbw.dll"
