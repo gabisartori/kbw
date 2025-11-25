@@ -338,6 +338,16 @@ impl QuantumExecution for Dense {
         self.state_0[0] = Complex64::new(1.0, 0.0);
         self.state = true;
     }
+
+    fn save(&self) -> Vec<u8> {
+        serde_json::to_vec(&self).unwrap()
+    }
+
+    fn load(&mut self, data: &[u8]) {
+        if let Ok(simulator) = serde_json::from_slice::<Self>(data) {
+            *self = simulator;
+        }
+    }
 }
 
 impl ExecutionFeatures for Dense {

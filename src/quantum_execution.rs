@@ -12,8 +12,6 @@ use ket::process::Sample;
 use ket::{execution::*, process::DumpData};
 use num::Integer;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::f64::consts::FRAC_PI_2;
 
 use crate::{
@@ -96,6 +94,9 @@ pub trait QuantumExecution {
     }
 
     fn clear(&mut self);
+
+    fn save(&self) -> Vec<u8>;
+    fn load(&mut self, data: &[u8]);
 }
 
 pub struct QubitManager<S: QuantumExecution> {
@@ -115,9 +116,7 @@ pub trait ExecutionFeatures {
     fn supports_gradient() -> bool;
 }
 
-impl<S: QuantumExecution + ExecutionFeatures + Serialize + DeserializeOwned + 'static>
-    QubitManager<S>
-{
+impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
     pub fn new(num_qubits: usize) -> Result<Self> {
         let seed = std::env::var("KBW_SEED")
             .unwrap_or_default()
@@ -248,7 +247,7 @@ impl<S: QuantumExecution> QubitManager<S> {
     }
 }
 
-impl<S: QuantumExecution + Serialize + DeserializeOwned> LiveExecution for QubitManager<S> {
+impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
     fn gate(&mut self, gate: QuantumGate, target: LogicalQubit, control: &[LogicalQubit]) {
         let control = control.iter().map(|qubit| qubit.index()).collect_vec();
         self.gate(gate, target.index(), &control)
@@ -274,13 +273,11 @@ impl<S: QuantumExecution + Serialize + DeserializeOwned> LiveExecution for Qubit
     }
 
     fn save(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.simulator).unwrap()
+        self.simulator.save()
     }
 
     fn load(&mut self, data: &[u8]) {
-        if let Ok(simulator) = serde_json::from_slice::<S>(data) {
-            self.simulator = simulator;
-        }
+        self.simulator.load(data);
     }
 }
 

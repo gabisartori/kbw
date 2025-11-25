@@ -72,7 +72,7 @@ mod tests {
         let mut error_code = 0;
         loop {
             let error = unsafe { KBWError::from_error_code(error_code) };
-            println!("#define KBW_{:#?} {}", error, error_code);
+            println!("#define KBW_{error:#?} {error_code}");
 
             if let KBWError::UndefinedError = error {
                 break;

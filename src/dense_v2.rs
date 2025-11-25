@@ -234,6 +234,16 @@ impl QuantumExecution for DenseV2 {
         self.0.fill(Complex64::zero());
         self.0[0] = Complex64::new(1.0, 0.0);
     }
+
+    fn save(&self) -> Vec<u8> {
+        serde_json::to_vec(&self).unwrap()
+    }
+
+    fn load(&mut self, data: &[u8]) {
+        if let Ok(simulator) = serde_json::from_slice::<Self>(data) {
+            *self = simulator;
+        }
+    }
 }
 
 impl ExecutionFeatures for DenseV2 {
