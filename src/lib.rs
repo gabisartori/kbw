@@ -7,11 +7,14 @@ pub mod bitwise;
 pub mod c_api;
 pub mod convert;
 pub mod dense;
+pub mod dense_gpu;
 pub mod dense_v2;
 pub mod error;
 pub mod quantum_execution;
 pub mod sparse;
 
 pub type DenseSimulator = quantum_execution::QubitManager<dense::Dense>;
+pub type DenseGPUSimulator =
+    quantum_execution::QubitManager<dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>>;
 pub type DenseV2Simulator = quantum_execution::QubitManager<dense::Dense>;
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse>;

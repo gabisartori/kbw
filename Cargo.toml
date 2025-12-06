@@ -18,23 +18,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = "0.6.0"
+libket = { path = "../libket" }
 num = { version = "0.4", features = ["serde"] }
 rand = "0.9.1"
 rayon = "1.5.3"
-twox-hash = "2.1.1"
+twox-hash = "2.1.2"
 itertools = "0.14.0"
-log = "0.4.27"
+log = "0.4.29"
 env_logger = "0.11.8"
-thiserror = "2.0.12"
-indicatif = "0.18.0"
-build-info = { version = "0.0.41", default-features = false, features = [] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-indexmap = "2.10.0"
+thiserror = "2.0.17"
+indicatif = "0.18.3"
+build-info = { version = "0.0.42", default-features = false, features = [] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+indexmap = "2.12.1"
+
+cubecl = { version = "0.8.1", features = ["wgpu"] }
 
 [build-dependencies]
-build-info-build = "0.0.41"
+build-info-build = "0.0.42"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
