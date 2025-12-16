@@ -610,11 +610,11 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn save(&self) -> Vec<u8> {
-        todo!()
+        unimplemented!("save quantum state is not available for KBW::DENSE::GPU")
     }
 
     fn load(&mut self, _data: &[u8]) {
-        todo!()
+        unimplemented!("load quantum state is not available for KBW::DENSE::GPU")
     }
 }
 
@@ -624,11 +624,11 @@ impl<R: Runtime, F: Float + CubeElement> ExecutionFeatures for DenseGPU<R, F> {
     }
 
     fn feature_sample() -> Capability {
-        Capability::Advanced
+        Capability::Unsupported
     }
 
     fn feature_exp_value() -> Capability {
-        Capability::Advanced
+        Capability::Unsupported
     }
 
     fn feature_dump() -> Capability {
