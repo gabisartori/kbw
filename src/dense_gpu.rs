@@ -1,6 +1,9 @@
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use cubecl::prelude::*;
 use ket::execution::Capability;
+use rand::distr::weighted::WeightedIndex;
+use rand::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{f32::consts::FRAC_1_SQRT_2, marker::PhantomData};
 
 pub struct DenseGPU<R: Runtime, F: Float + CubeElement> {
@@ -18,7 +21,6 @@ fn compute_ket_kernel(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
     offset_x: u32,
     offset_y: u32,
 ) -> (u32, u32, bool) {
@@ -28,11 +30,7 @@ fn compute_ket_kernel(
         + UNIT_POS_Y;
     let ket1 = ket0 + half_block_size;
 
-    (
-        ket0,
-        ket1,
-        ket1 < state_size && ket0 & control_mask == control_mask,
-    )
+    (ket0, ket1, ket0 & control_mask == control_mask)
 }
 
 #[cube(launch_unchecked)]
@@ -42,7 +40,7 @@ fn gate_x_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
 ) {
@@ -50,7 +48,6 @@ fn gate_x_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -73,7 +70,7 @@ fn gate_y_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
 ) {
@@ -81,7 +78,6 @@ fn gate_y_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -105,7 +101,7 @@ fn gate_z_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
 ) {
@@ -113,7 +109,6 @@ fn gate_z_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -131,7 +126,7 @@ fn gate_h_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
     frac_1_sqrt_2: F,
@@ -140,7 +135,6 @@ fn gate_h_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -193,7 +187,7 @@ fn gate_p_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
     angle_real: F,
@@ -203,7 +197,6 @@ fn gate_p_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -227,7 +220,7 @@ fn gate_rx_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
     cos_theta_2: F,
@@ -237,7 +230,6 @@ fn gate_rx_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -314,7 +306,7 @@ fn gate_ry_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
     cos_theta_2: F,
@@ -324,7 +316,6 @@ fn gate_ry_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -401,7 +392,7 @@ fn gate_rz_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    state_size: u32,
+
     offset_x: u32,
     offset_y: u32,
     angle_real: F,
@@ -411,7 +402,6 @@ fn gate_rz_kernel<F: Float>(
         control_mask,
         half_block_size,
         full_block_size,
-        state_size,
         offset_x,
         offset_y,
     );
@@ -441,18 +431,36 @@ fn gate_rz_kernel<F: Float>(
 fn measure_p1_kernel<F: Float>(
     state_real: &Array<F>,
     state_imag: &Array<F>,
-    state_size: u32,
     prob: &mut Array<F>,
     target_mask: u32,
 ) {
     let state = (CUBE_POS_X << 10) + UNIT_POS_X;
-    if state < state_size {
-        prob[state] = if state & target_mask == target_mask {
-            state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
-        } else {
-            F::new(0.0)
-        }
+    prob[state] = if (state & target_mask) == target_mask {
+        state_real[state] * state_real[state] + state_imag[state] * -state_imag[state]
+    } else {
+        F::new(0.0)
     }
+}
+
+#[cube(launch_unchecked)]
+fn measure_collapse_kernel<F: Float>(
+    state_real: &mut Array<F>,
+    state_imag: &mut Array<F>,
+    target_mask: u32,
+    result: u32,
+    p: F,
+) {
+    let state = (CUBE_POS_X << 10) + UNIT_POS_X;
+    state_real[state] = if (state & target_mask) == result {
+        state_real[state] * p
+    } else {
+        F::new(0.0)
+    };
+    state_imag[state] = if (state & target_mask) == result {
+        state_imag[state] * p
+    } else {
+        F::new(0.0)
+    };
 }
 
 fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, CubeDim, u32, u32) {
@@ -460,23 +468,26 @@ fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, 
     let full_block_size = half_block_size << 1;
     let num_blocks = 1u32 << (num_qubits - target - 1);
 
-    let cube_count_x = num_blocks.div_ceil(1024);
-    let cube_count_y = half_block_size.div_ceil(1024);
-    let mut cube_dim_x = std::cmp::min(1024, num_blocks);
-    let mut cube_dim_y = std::cmp::min(1024, half_block_size);
-
-    let mut offset_x = if cube_count_x == 1 { 0 } else { 10 };
-    let mut offset_y = if cube_count_y == 1 { 0 } else { 10 };
+    let mut cube_count_x = 1;
+    let mut cube_count_y = 1;
+    let mut cube_dim_x = num_blocks;
+    let mut cube_dim_y = half_block_size;
+    let mut offset_x = 0;
+    let mut offset_y = 0;
 
     while cube_dim_x * cube_dim_y > 1024 {
-        if cube_count_x > cube_count_y {
-            offset_x += 1;
+        if cube_dim_x > cube_dim_y {
             cube_dim_x >>= 1;
+            cube_count_x <<= 1;
+            offset_x += 1;
         } else {
-            offset_y += 1;
             cube_dim_y >>= 1;
+            cube_count_y <<= 1;
+            offset_y += 1;
         }
     }
+
+    //println!("num_qubits={num_qubits}, target={target} => half_block_size={half_block_size}, full_block_size={full_block_size}, num_blocks={num_blocks}, cube_count=({cube_count_x}, {cube_count_y}), cube_dim=({cube_dim_x}, {cube_dim_y}), offset=({offset_x}, {offset_y})");
 
     (
         half_block_size,
@@ -523,6 +534,8 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
+        //println!("Call X {target}");
+
         let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
@@ -535,11 +548,14 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
             );
         }
+
+        //let state_real = self.client.read_one(self.state_real.clone());
+        //let state_real = F::from_bytes(&state_real);
+        //println!("state_real={state_real:?}")
     }
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
@@ -555,7 +571,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
             );
@@ -575,7 +590,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
             );
@@ -595,7 +609,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
                 ScalarArg::new(F::new(FRAC_1_SQRT_2)),
@@ -616,7 +629,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
                 ScalarArg::new(F::new(lambda.cos() as f32)),
@@ -638,7 +650,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
@@ -660,7 +671,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
@@ -682,7 +692,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(self.state_size as u32),
                 ScalarArg::new(offset_x),
                 ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
@@ -692,45 +701,82 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn measure<RNG: rand::Rng>(&mut self, target: usize, rng: &mut RNG) -> bool {
-        let prob = self.client.empty(self.state_size);
+        let prob = self
+            .client
+            .empty(self.state_size * core::mem::size_of::<F>());
+
+        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
+            (1, self.state_size)
+        } else {
+            (1 << (self.num_qubits - 10), 1024)
+        };
+
+        let target_mask = 1 << target;
 
         unsafe {
             measure_p1_kernel::launch_unchecked::<F, R>(
                 &self.client,
-                CubeCount::new_1d(if self.num_qubits > 10 {
-                    1 << (self.num_qubits - 10)
-                } else {
-                    1
-                }),
-                CubeDim::new_1d(if self.num_qubits > 10 {
-                    1024
-                } else {
-                    self.state_size as u32
-                }),
+                CubeCount::new_1d(cube_count as u32),
+                CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(self.state_size as u32),
                 ArrayArg::from_raw_parts::<F>(&prob, self.state_size, 1),
-                ScalarArg::new(1 << target),
+                ScalarArg::new(target_mask),
             );
         }
 
-        todo!()
+        let prob = self.client.read_one(prob);
+        let prob = f32::from_bytes(&prob);
+
+        //println!("prob={prob:?}");
+
+        let p1: f32 = prob.par_iter().sum();
+
+        let p0 = match 1.0 - p1 {
+            p0 if p0 >= 0.0 => p0,
+            _ => 0.0,
+        };
+
+        //println!("P0={p0}; P1={p1}; target={target}");
+
+        let result = WeightedIndex::new([p0, p1]).unwrap().sample(rng) == 1;
+
+        let p = 1.0 / f32::sqrt(if result { p1 } else { p0 });
+
+        unsafe {
+            measure_collapse_kernel::launch_unchecked::<F, R>(
+                &self.client,
+                CubeCount::new_1d(cube_count as u32),
+                CubeDim::new_1d(cube_dim as u32),
+                ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
+                ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
+                ScalarArg::new(target_mask),
+                ScalarArg::new(if result { target_mask } else { 0 }),
+                ScalarArg::new(F::new(p)),
+            );
+        }
+
+        result
     }
 
-    fn dump(&mut self, qubits: &[usize]) -> ket::process::DumpData {
+    fn dump(&mut self, _qubits: &[usize]) -> ket::process::DumpData {
         todo!()
     }
 
     fn clear(&mut self) {
-        todo!()
+        let mut data = vec![F::new(0.0); self.state_size];
+
+        self.state_imag = self.client.create(F::as_bytes(&data));
+
+        data[0] = F::new(1.0);
+        self.state_real = self.client.create(F::as_bytes(&data));
     }
 
     fn save(&self) -> Vec<u8> {
         todo!()
     }
 
-    fn load(&mut self, data: &[u8]) {
+    fn load(&mut self, _data: &[u8]) {
         todo!()
     }
 }

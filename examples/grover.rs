@@ -8,13 +8,10 @@ use kbw::DenseSimulator;
 use ket::prelude::*;
 
 fn main() -> Result<(), KetError> {
-    //set_log_level(4);
+    let size = 16;
+    let (target, execution) = DenseSimulator::configuration(size, false, None, None, None, false);
 
-    let config = DenseSimulator::configuration(12, false, Some(ket::ex_arch::GRID12.into()));
-
-    let mut process = Process::new(config);
-
-    let size = 7;
+    let mut process = Process::new(target, execution);
 
     let qubits: Vec<_> = (0..size).map(|_| process.alloc().unwrap()).collect();
 
@@ -22,16 +19,12 @@ fn main() -> Result<(), KetError> {
         process.gate(QuantumGate::Hadamard, *qubit)?;
     }
 
-    let mut dumps = vec![];
-
     let steps = ((FRAC_PI_4) * f64::sqrt((1 << size) as f64)) as i64;
 
     for _ in 0..steps {
         ctrl(&mut process, &qubits[1..], |process| {
             process.gate(QuantumGate::PauliZ, qubits[0])
         })?;
-
-        //        dumps.push(process.dump(&qubits)?);
 
         around(
             &mut process,
@@ -51,18 +44,15 @@ fn main() -> Result<(), KetError> {
                 })
             },
         )?;
-
-        //      dumps.push(process.dump(&qubits)?);
     }
-    dumps.push(process.dump(&qubits)?);
 
-    process.transpile();
+    let result = process.measure(&qubits)?;
+
     process.execute()?;
 
-    for dump in dumps {
-        if let Some(plot) = process.get_dump(dump).map(plot_dump) {
-            plot.show();
-        }
-    }
+    let result = process.get_measure(result).unwrap();
+
+    println!("Result {:#064b}", result);
+
     Ok(())
 }
