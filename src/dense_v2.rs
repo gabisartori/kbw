@@ -2,42 +2,43 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::bitwise::*;
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use crate::{bitwise::*, FloatOps};
 use itertools::Itertools;
 use ket::execution::*;
 use ket::process::DumpData;
 use log::error;
-use num::{complex::Complex64, Zero};
+use num::Zero;
+use num::{Complex, One};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::f64::consts::FRAC_1_SQRT_2;
 
 #[derive(Serialize, Deserialize)]
-pub struct DenseV2(Vec<Complex64>);
+pub struct DenseV2<F: FloatOps>(Vec<Complex<F>>);
 
-impl DenseV2 {
-    fn gate<F>(&mut self, gate_impl: F, target: usize, control: &[usize])
+impl<F: FloatOps> DenseV2<F> {
+    fn gate<G>(&mut self, gate_impl: G, target: usize, control: &[usize])
     where
-        F: Fn((&mut Complex64, &mut Complex64)) + std::marker::Sync,
+        G: Fn((&mut Complex<F>, &mut Complex<F>)) + std::marker::Sync,
     {
         let half_block_size = 1 << target;
         let full_block_size = half_block_size << 1;
 
-        let inner_gate = |chunk_id: usize, (upper, lower): (&mut [Complex64], &mut [Complex64])| {
-            upper
-                .par_iter_mut()
-                .zip(lower.par_iter_mut())
-                .enumerate()
-                .for_each(|(index, op)| {
-                    if ctrl_check(chunk_id * full_block_size + index, control) {
-                        gate_impl(op);
-                    }
-                });
-        };
+        let inner_gate =
+            |chunk_id: usize, (upper, lower): (&mut [Complex<F>], &mut [Complex<F>])| {
+                upper
+                    .par_iter_mut()
+                    .zip(lower.par_iter_mut())
+                    .enumerate()
+                    .for_each(|(index, op)| {
+                        if ctrl_check(chunk_id * full_block_size + index, control) {
+                            gate_impl(op);
+                        }
+                    });
+            };
 
         self.0
             .par_chunks_mut(full_block_size)
@@ -48,7 +49,7 @@ impl DenseV2 {
     }
 }
 
-impl QuantumExecution for DenseV2 {
+impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     fn new(num_qubits: usize) -> Result<Self>
     where
         Self: Sized,
@@ -60,8 +61,8 @@ impl QuantumExecution for DenseV2 {
 
         let num_states = 1 << num_qubits;
         let mut state = Vec::new();
-        state.resize(num_states, Complex64::zero());
-        state[0] = Complex64::new(1.0, 0.0);
+        state.resize(num_states, Complex::<F>::zero());
+        state[0] = Complex::<F>::one();
 
         Ok(DenseV2(state))
     }
@@ -80,8 +81,8 @@ impl QuantumExecution for DenseV2 {
         self.gate(
             |(ket0, ket1)| {
                 std::mem::swap(ket0, ket1);
-                *ket0 *= -Complex64::i();
-                *ket1 *= Complex64::i();
+                *ket0 *= -Complex::<F>::i();
+                *ket1 *= Complex::<F>::i();
             },
             target,
             control,
@@ -91,7 +92,7 @@ impl QuantumExecution for DenseV2 {
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
         self.gate(
             |(_ket0, ket1)| {
-                *ket1 *= -Complex64::from(1.0);
+                *ket1 *= -Complex::<F>::one();
             },
             target,
             control,
@@ -103,8 +104,8 @@ impl QuantumExecution for DenseV2 {
             |(ket0, ket1)| {
                 let tmp_ket0 = *ket0;
                 let tmp_ket1 = *ket1;
-                *ket0 = (tmp_ket0 + tmp_ket1) * FRAC_1_SQRT_2;
-                *ket1 = (tmp_ket0 - tmp_ket1) * FRAC_1_SQRT_2;
+                *ket0 = (tmp_ket0 + tmp_ket1) * F::FRAC_1_SQRT_2();
+                *ket1 = (tmp_ket0 - tmp_ket1) * F::FRAC_1_SQRT_2();
             },
             target,
             control,
@@ -112,10 +113,10 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        let phase = Complex64::exp(lambda * Complex64::i());
+        let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
 
         self.gate(
-            |(_ket0, ket1): (&mut Complex64, &mut Complex64)| {
+            |(_ket0, ket1): (&mut Complex<F>, &mut Complex<F>)| {
                 *ket1 *= phase;
             },
             target,
@@ -124,8 +125,8 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
-        let sin_theta_2 = -Complex64::i() * f64::sin(theta / 2.0);
+        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
+        let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
 
         self.gate(
             |(ket0, ket1)| {
@@ -140,8 +141,8 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
-        let p_sin_theta_2 = Complex64::from(f64::sin(theta / 2.0));
+        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
+        let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
         let m_sin_theta_2 = -p_sin_theta_2;
 
         self.gate(
@@ -157,8 +158,8 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let phase_0 = Complex64::exp(-theta / 2.0 * Complex64::i());
-        let phase_1 = Complex64::exp(theta / 2.0 * Complex64::i());
+        let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
+        let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
 
         self.gate(
             |(ket0, ket1)| {
@@ -171,7 +172,7 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
-        let p1: f64 = self
+        let p1 = self
             .0
             .par_iter()
             .enumerate()
@@ -179,25 +180,28 @@ impl QuantumExecution for DenseV2 {
                 if is_one_at(state, target) {
                     amp.norm().powi(2)
                 } else {
-                    0.0
+                    F::zero()
                 }
             })
             .sum();
 
-        let p0 = match 1.0 - p1 {
-            p0 if p0 >= 0.0 => p0,
-            _ => 0.0,
+        let p0 = match F::one() - p1 {
+            p0 if p0 >= F::zero() => p0,
+            _ => F::zero(),
         };
 
-        let result = WeightedIndex::new([p0, p1]).unwrap().sample(rng) == 1;
+        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .unwrap()
+            .sample(rng)
+            == 1;
 
-        let p = 1.0 / f64::sqrt(if result { p1 } else { p0 });
+        let p = F::one() / F::sqrt(if result { p1 } else { p0 });
 
         self.0.par_iter_mut().enumerate().for_each(|(state, amp)| {
             *amp = if is_one_at(state, target) == result {
                 *amp * p
             } else {
-                Complex64::zero()
+                Complex::<F>::zero()
             };
         });
 
@@ -209,7 +213,7 @@ impl QuantumExecution for DenseV2 {
             .0
             .iter()
             .enumerate()
-            .filter(|(_state, amp)| amp.norm() > 1e-15)
+            .filter(|(_state, amp)| amp.norm() > F::from(1e-15).unwrap())
             .map(|(state, amp)| {
                 let state = qubits
                     .iter()
@@ -219,7 +223,11 @@ impl QuantumExecution for DenseV2 {
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 
-                (Vec::from([state as u64]), amp.re, amp.im)
+                (
+                    Vec::from([state as u64]),
+                    amp.re.to_f64().unwrap(),
+                    amp.im.to_f64().unwrap(),
+                )
             })
             .multiunzip();
 
@@ -231,22 +239,20 @@ impl QuantumExecution for DenseV2 {
     }
 
     fn clear(&mut self) {
-        self.0.fill(Complex64::zero());
-        self.0[0] = Complex64::new(1.0, 0.0);
+        self.0.fill(Complex::<F>::zero());
+        self.0[0] = Complex::<F>::one();
     }
 
     fn save(&self) -> Vec<u8> {
-        serde_json::to_vec(&self).unwrap()
+        unimplemented!()
     }
 
-    fn load(&mut self, data: &[u8]) {
-        if let Ok(simulator) = serde_json::from_slice::<Self>(data) {
-            *self = simulator;
-        }
+    fn load(&mut self, _data: &[u8]) {
+        unimplemented!()
     }
 }
 
-impl ExecutionFeatures for DenseV2 {
+impl<F: FloatOps> ExecutionFeatures for DenseV2<F> {
     fn feature_measure() -> Capability {
         Capability::Advanced
     }

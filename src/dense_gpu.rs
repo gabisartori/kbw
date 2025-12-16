@@ -2,15 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use crate::{
+    quantum_execution::{ExecutionFeatures, QuantumExecution},
+    FloatOps,
+};
 use cubecl::prelude::*;
 use ket::execution::Capability;
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{f32::consts::FRAC_1_SQRT_2, marker::PhantomData};
+use std::marker::PhantomData;
 
-pub struct DenseGPU<R: Runtime, F: Float + CubeElement> {
+pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps> {
     state_real: cubecl::server::Handle,
     state_imag: cubecl::server::Handle,
     state_size: usize,
@@ -267,7 +270,6 @@ fn gate_rz_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-
     angle_real: F,
     angle_imag: F,
 ) {
@@ -364,7 +366,7 @@ fn compute_control_mask(control: &[usize]) -> u32 {
     control_mask
 }
 
-impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
+impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
         Self: Sized,
@@ -460,7 +462,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(F::new(FRAC_1_SQRT_2)),
+                ScalarArg::new(F::FRAC_1_SQRT_2()),
             );
         }
     }
@@ -478,8 +480,8 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(F::new(lambda.cos() as f32)),
-                ScalarArg::new(F::new(lambda.sin() as f32)),
+                ScalarArg::new(F::from(lambda.cos()).unwrap()),
+                ScalarArg::new(F::from(lambda.sin()).unwrap()),
             );
         }
     }
@@ -497,8 +499,8 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
-                ScalarArg::new(F::new(-(theta / 2.0).sin() as f32)),
+                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                ScalarArg::new(F::from(-(theta / 2.0).sin()).unwrap()),
             );
         }
     }
@@ -516,8 +518,8 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
-                ScalarArg::new(F::new((theta / 2.0).sin() as f32)),
+                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
             );
         }
     }
@@ -535,8 +537,8 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
-                ScalarArg::new(F::new((theta / 2.0).sin() as f32)),
+                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
             );
         }
     }
@@ -567,22 +569,25 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
         }
 
         let prob = self.client.read_one(prob);
-        let prob = f32::from_bytes(&prob);
+        let prob = F::from_bytes(&prob);
 
         //println!("prob={prob:?}");
 
-        let p1: f32 = prob.par_iter().sum();
+        let p1: F = prob.par_iter().copied().sum();
 
-        let p0 = match 1.0 - p1 {
-            p0 if p0 >= 0.0 => p0,
-            _ => 0.0,
+        let p0 = match F::one() - p1 {
+            p0 if p0 >= F::zero() => p0,
+            _ => F::zero(),
         };
 
         //println!("P0={p0}; P1={p1}; target={target}");
 
-        let result = WeightedIndex::new([p0, p1]).unwrap().sample(rng) == 1;
+        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .unwrap()
+            .sample(rng)
+            == 1;
 
-        let p = 1.0 / f32::sqrt(if result { p1 } else { p0 });
+        let p = F::one() / <F as num_traits::Float>::sqrt(if result { p1 } else { p0 });
 
         unsafe {
             measure_collapse_kernel::launch_unchecked::<F, R>(
@@ -593,7 +598,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
                 ScalarArg::new(target_mask),
                 ScalarArg::new(if result { target_mask } else { 0 }),
-                ScalarArg::new(F::new(p)),
+                ScalarArg::new(p),
             );
         }
 
@@ -622,7 +627,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 }
 
-impl<R: Runtime, F: Float + CubeElement> ExecutionFeatures for DenseGPU<R, F> {
+impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseGPU<R, F> {
     fn feature_measure() -> Capability {
         Capability::Advanced
     }

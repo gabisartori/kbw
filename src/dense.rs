@@ -3,30 +3,30 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::bitwise::*;
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use crate::{bitwise::*, FloatOps};
 use itertools::Itertools;
 use ket::execution::*;
 use ket::process::DumpData;
 use log::error;
-use num::{complex::Complex64, Zero};
+use num::complex::Complex;
+use num::{One, Zero};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::f64::consts::FRAC_1_SQRT_2;
 
 #[derive(Serialize, Deserialize)]
-pub struct Dense {
-    state_0: Vec<Complex64>,
-    state_1: Vec<Complex64>,
+pub struct Dense<F: FloatOps> {
+    state_0: Vec<Complex<F>>,
+    state_1: Vec<Complex<F>>,
     state: bool,
     num_states: usize,
 }
 
-impl Dense {
-    fn get_states(&mut self) -> (&mut [Complex64], &mut [Complex64]) {
+impl<F: FloatOps> Dense<F> {
+    fn get_states(&mut self) -> (&mut [Complex<F>], &mut [Complex<F>]) {
         self.state = !self.state;
         if self.state {
             (&mut self.state_1, &mut self.state_0)
@@ -35,7 +35,7 @@ impl Dense {
         }
     }
 
-    fn get_current_state(&self) -> &[Complex64] {
+    fn get_current_state(&self) -> &[Complex<F>] {
         if self.state {
             &self.state_0
         } else {
@@ -44,7 +44,7 @@ impl Dense {
     }
 }
 
-impl QuantumExecution for Dense {
+impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn new(num_qubits: usize) -> Result<Self> {
         if num_qubits > 32 {
             error!("dense implementation supports up to 32 qubits");
@@ -54,10 +54,10 @@ impl QuantumExecution for Dense {
         let num_states = 1 << num_qubits;
         let mut state_0 = Vec::new();
         let mut state_1 = Vec::new();
-        state_0.resize(num_states, Complex64::zero());
-        state_1.resize(num_states, Complex64::zero());
+        state_0.resize(num_states, Complex::<F>::zero());
+        state_1.resize(num_states, Complex::<F>::zero());
 
-        state_0[0] = Complex64::new(1.0, 0.0);
+        state_0[0] = Complex::<F>::one();
 
         Ok(Dense {
             state: true,
@@ -92,9 +92,9 @@ impl QuantumExecution for Dense {
                 if ctrl_check(state, control) {
                     *amp = current_state[bit_flip(state, target)]
                         * if is_one_at(state, target) {
-                            Complex64::i()
+                            Complex::<F>::i()
                         } else {
-                            -Complex64::i()
+                            -Complex::<F>::i()
                         };
                 } else {
                     *amp = current_state[state];
@@ -125,9 +125,9 @@ impl QuantumExecution for Dense {
             .enumerate()
             .for_each(|(state, amp)| {
                 if ctrl_check(state, control) {
-                    *amp = current_state[bit_flip(state, target)] * FRAC_1_SQRT_2;
+                    *amp = current_state[bit_flip(state, target)] * F::FRAC_1_SQRT_2();
                 } else {
-                    *amp = Complex64::zero();
+                    *amp = Complex::<F>::zero();
                 }
             });
 
@@ -137,9 +137,9 @@ impl QuantumExecution for Dense {
             .for_each(|(state, amp)| {
                 if ctrl_check(state, control) {
                     *amp *= if is_one_at(state, target) {
-                        -FRAC_1_SQRT_2
+                        -F::FRAC_1_SQRT_2()
                     } else {
-                        FRAC_1_SQRT_2
+                        F::FRAC_1_SQRT_2()
                     };
                 }
             });
@@ -155,7 +155,7 @@ impl QuantumExecution for Dense {
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let phase = Complex64::exp(lambda * Complex64::i());
+        let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
 
         next_state
             .par_iter_mut()
@@ -172,8 +172,8 @@ impl QuantumExecution for Dense {
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
-        let sin_theta_2 = -Complex64::i() * f64::sin(theta / 2.0);
+        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
+        let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
 
         next_state
             .par_iter_mut()
@@ -182,7 +182,7 @@ impl QuantumExecution for Dense {
                 if ctrl_check(state, control) {
                     *amp = current_state[bit_flip(state, target)] * sin_theta_2;
                 } else {
-                    *amp = Complex64::zero();
+                    *amp = Complex::<F>::zero();
                 }
             });
 
@@ -206,8 +206,8 @@ impl QuantumExecution for Dense {
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let cons_theta_2 = Complex64::from(f64::cos(theta / 2.0));
-        let p_sin_theta_2 = Complex64::from(f64::sin(theta / 2.0));
+        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
+        let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
         let m_sin_theta_2 = -p_sin_theta_2;
 
         next_state
@@ -222,7 +222,7 @@ impl QuantumExecution for Dense {
                             m_sin_theta_2
                         };
                 } else {
-                    *amp = Complex64::zero();
+                    *amp = Complex::<F>::zero();
                 }
             });
 
@@ -246,8 +246,8 @@ impl QuantumExecution for Dense {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let phase_0 = Complex64::exp(-theta / 2.0 * Complex64::i());
-        let phase_1 = Complex64::exp(theta / 2.0 * Complex64::i());
+        let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
+        let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
 
         next_state
             .par_iter_mut()
@@ -269,26 +269,29 @@ impl QuantumExecution for Dense {
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
         let (current_state, next_state) = self.get_states();
 
-        let p1: f64 = current_state
+        let p1: F = current_state
             .par_iter()
             .enumerate()
             .map(|(state, amp)| {
                 if is_one_at(state, target) {
                     amp.norm().powi(2)
                 } else {
-                    0.0
+                    F::zero()
                 }
             })
             .sum();
 
-        let p0 = match 1.0 - p1 {
-            p0 if p0 >= 0.0 => p0,
-            _ => 0.0,
+        let p0 = match F::one() - p1 {
+            p0 if p0 >= F::zero() => p0,
+            _ => F::zero(),
         };
 
-        let result = WeightedIndex::new([p0, p1]).unwrap().sample(rng) == 1;
+        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .unwrap()
+            .sample(rng)
+            == 1;
 
-        let p = 1.0 / f64::sqrt(if result { p1 } else { p0 });
+        let p = F::one() / F::sqrt(if result { p1 } else { p0 });
 
         next_state
             .par_iter_mut()
@@ -297,7 +300,7 @@ impl QuantumExecution for Dense {
                 *amp = if is_one_at(state, target) == result {
                     current_state[state] * p
                 } else {
-                    Complex64::zero()
+                    Complex::<F>::zero()
                 };
             });
 
@@ -306,10 +309,10 @@ impl QuantumExecution for Dense {
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let state = self.get_current_state();
-        let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<_>, Vec<_>) = state
+        let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<f64>, Vec<f64>) = state
             .iter()
             .enumerate()
-            .filter(|(_state, amp)| amp.norm() > 1e-15)
+            .filter(|(_state, amp)| amp.norm() > F::from(1e-15).unwrap())
             .map(|(state, amp)| {
                 let state = qubits
                     .iter()
@@ -319,7 +322,11 @@ impl QuantumExecution for Dense {
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 
-                (Vec::from([state as u64]), amp.re, amp.im)
+                (
+                    Vec::from([state as u64]),
+                    amp.re.to_f64().unwrap(),
+                    amp.im.to_f64().unwrap(),
+                )
             })
             .multiunzip();
 
@@ -333,24 +340,22 @@ impl QuantumExecution for Dense {
     fn clear(&mut self) {
         self.state_0.clear();
         self.state_1.clear();
-        self.state_0.resize(self.num_states, Complex64::zero());
-        self.state_1.resize(self.num_states, Complex64::zero());
-        self.state_0[0] = Complex64::new(1.0, 0.0);
+        self.state_0.resize(self.num_states, Complex::<F>::zero());
+        self.state_1.resize(self.num_states, Complex::<F>::zero());
+        self.state_0[0] = Complex::<F>::one();
         self.state = true;
     }
 
     fn save(&self) -> Vec<u8> {
-        serde_json::to_vec(&self).unwrap()
+        unimplemented!()
     }
 
-    fn load(&mut self, data: &[u8]) {
-        if let Ok(simulator) = serde_json::from_slice::<Self>(data) {
-            *self = simulator;
-        }
+    fn load(&mut self, _data: &[u8]) {
+        unimplemented!()
     }
 }
 
-impl ExecutionFeatures for Dense {
+impl<F: FloatOps> ExecutionFeatures for Dense<F> {
     fn feature_measure() -> Capability {
         Capability::Advanced
     }
