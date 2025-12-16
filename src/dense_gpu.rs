@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+//
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use cubecl::prelude::*;
 use ket::execution::Capability;

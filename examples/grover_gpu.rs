@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
+// SPDX-FileCopyrightText: 2025 Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>
 //
 // SPDX-License-Identifier: Apache-2.0
 
