@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    error::KBWError, DenseGPUSimulator, DenseSimulator, DenseV2Simulator, SparseSimulator,
+    error::KBWError, DenseCUDASimulator, DenseGPUSimulator, DenseSimulator, DenseV2Simulator,
+    SparseSimulator,
 };
 use env_logger::Builder;
 use ket::prelude::ExecutionTarget;
@@ -122,6 +123,14 @@ pub unsafe extern "C" fn kbw_make_configuration(
             gradient,
         ),
         3 => DenseGPUSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            sample_base,
+            classical_shadows,
+            gradient,
+        ),
+        4 => DenseCUDASimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
