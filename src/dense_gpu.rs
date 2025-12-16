@@ -115,29 +115,16 @@ fn gate_h_kernel<F: Float>(
 }
 
 #[cube]
-fn complex_mul_kernel<F: Float>(
-    lhs_real: F,
-    lhs_imag: F,
-    rhs_real: F,
-    rhs_imag: F,
-    result_real: &mut F,
-    result_imag: &mut F,
-) {
-    *result_real = lhs_real * rhs_real - lhs_imag * rhs_imag;
-    *result_imag = lhs_real * rhs_imag + lhs_imag * rhs_real;
+fn complex_mul_kernel<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
+    (
+        lhs_real * rhs_real - lhs_imag * rhs_imag,
+        lhs_real * rhs_imag + lhs_imag * rhs_real,
+    )
 }
 
 #[cube]
-fn complex_add_kernel<F: Float>(
-    lhs_real: F,
-    lhs_imag: F,
-    rhs_real: F,
-    rhs_imag: F,
-    result_real: &mut F,
-    result_imag: &mut F,
-) {
-    *result_real = lhs_real + rhs_real;
-    *result_imag = lhs_imag + rhs_imag;
+fn complex_add_kernel<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
+    (lhs_real + rhs_real, lhs_imag + rhs_imag)
 }
 
 #[cube(launch_unchecked)]
@@ -154,14 +141,10 @@ fn gate_p_kernel<F: Float>(
     let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
-        complex_mul_kernel::<F>(
-            state_real[ket.1],
-            state_imag[ket.1],
-            angle_real,
-            angle_imag,
-            &mut state_real[ket.1],
-            &mut state_imag[ket.1],
-        );
+        let (r, i) =
+            complex_mul_kernel::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
+        state_real[ket.1] = r;
+        state_imag[ket.1] = i;
     }
 }
 
@@ -179,67 +162,43 @@ fn gate_rx_kernel<F: Float>(
     let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
-        let mut ket0_cos_real = F::new(0.0);
-        let mut ket0_cos_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket0_cos_real, ket0_cos_imag) = complex_mul_kernel::<F>(
             cos_theta_2,
             F::new(0.0),
             state_real[ket.0],
             state_imag[ket.0],
-            &mut ket0_cos_real,
-            &mut ket0_cos_imag,
         );
 
-        let mut ket1_sin_real = F::new(0.0);
-        let mut ket1_sin_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket1_sin_real, ket1_sin_imag) = complex_mul_kernel::<F>(
             F::new(0.0),
             sin_theta_2,
             state_real[ket.1],
             state_imag[ket.1],
-            &mut ket1_sin_real,
-            &mut ket1_sin_imag,
         );
 
-        let mut ket0_sin_real = F::new(0.0);
-        let mut ket0_sin_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket0_sin_real, ket0_sin_imag) = complex_mul_kernel::<F>(
             F::new(0.0),
             sin_theta_2,
             state_real[ket.0],
             state_imag[ket.0],
-            &mut ket0_sin_real,
-            &mut ket0_sin_imag,
         );
 
-        let mut ket1_cos_real = F::new(0.0);
-        let mut ket1_cos_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket1_cos_real, ket1_cos_imag) = complex_mul_kernel::<F>(
             cos_theta_2,
             F::new(0.0),
             state_real[ket.1],
             state_imag[ket.1],
-            &mut ket1_cos_real,
-            &mut ket1_cos_imag,
         );
 
-        complex_add_kernel::<F>(
-            ket0_cos_real,
-            ket0_cos_imag,
-            ket1_sin_real,
-            ket1_sin_imag,
-            &mut state_real[ket.0],
-            &mut state_imag[ket.0],
-        );
+        let (r, i) =
+            complex_add_kernel::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
+        state_real[ket.0] = r;
+        state_imag[ket.0] = i;
 
-        complex_add_kernel::<F>(
-            ket0_sin_real,
-            ket0_sin_imag,
-            ket1_cos_real,
-            ket1_cos_imag,
-            &mut state_real[ket.1],
-            &mut state_imag[ket.1],
-        );
+        let (r, i) =
+            complex_add_kernel::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
+        state_real[ket.1] = r;
+        state_imag[ket.1] = i;
     }
 }
 
@@ -257,67 +216,43 @@ fn gate_ry_kernel<F: Float>(
     let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
-        let mut ket0_cos_real = F::new(0.0);
-        let mut ket0_cos_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket0_cos_real, ket0_cos_imag) = complex_mul_kernel::<F>(
             cos_theta_2,
             F::new(0.0),
             state_real[ket.0],
             state_imag[ket.0],
-            &mut ket0_cos_real,
-            &mut ket0_cos_imag,
         );
 
-        let mut ket1_sin_real = F::new(0.0);
-        let mut ket1_sin_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket1_sin_real, ket1_sin_imag) = complex_mul_kernel::<F>(
             -sin_theta_2,
             F::new(0.0),
             state_real[ket.1],
             state_imag[ket.1],
-            &mut ket1_sin_real,
-            &mut ket1_sin_imag,
         );
 
-        let mut ket0_sin_real = F::new(0.0);
-        let mut ket0_sin_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket0_sin_real, ket0_sin_imag) = complex_mul_kernel::<F>(
             sin_theta_2,
             F::new(0.0),
             state_real[ket.0],
             state_imag[ket.0],
-            &mut ket0_sin_real,
-            &mut ket0_sin_imag,
         );
 
-        let mut ket1_cos_real = F::new(0.0);
-        let mut ket1_cos_imag = F::new(0.0);
-        complex_mul_kernel::<F>(
+        let (ket1_cos_real, ket1_cos_imag) = complex_mul_kernel::<F>(
             cos_theta_2,
             F::new(0.0),
             state_real[ket.1],
             state_imag[ket.1],
-            &mut ket1_cos_real,
-            &mut ket1_cos_imag,
         );
 
-        complex_add_kernel::<F>(
-            ket0_cos_real,
-            ket0_cos_imag,
-            ket1_sin_real,
-            ket1_sin_imag,
-            &mut state_real[ket.0],
-            &mut state_imag[ket.0],
-        );
+        let (r, i) =
+            complex_add_kernel::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
+        state_real[ket.0] = r;
+        state_imag[ket.0] = i;
 
-        complex_add_kernel::<F>(
-            ket0_sin_real,
-            ket0_sin_imag,
-            ket1_cos_real,
-            ket1_cos_imag,
-            &mut state_real[ket.1],
-            &mut state_imag[ket.1],
-        );
+        let (r, i) =
+            complex_add_kernel::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
+        state_real[ket.1] = r;
+        state_imag[ket.1] = i;
     }
 }
 
@@ -335,23 +270,19 @@ fn gate_rz_kernel<F: Float>(
     let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
-        complex_mul_kernel::<F>(
+        let (r, i) = complex_mul_kernel::<F>(
             state_real[ket.0],
             state_imag[ket.0],
             angle_real,
             -angle_imag,
-            &mut state_real[ket.0],
-            &mut state_imag[ket.0],
         );
+        state_real[ket.0] = r;
+        state_imag[ket.0] = i;
 
-        complex_mul_kernel::<F>(
-            state_real[ket.1],
-            state_imag[ket.1],
-            angle_real,
-            angle_imag,
-            &mut state_real[ket.1],
-            &mut state_imag[ket.1],
-        );
+        let (r, i) =
+            complex_mul_kernel::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
+        state_real[ket.1] = r;
+        state_imag[ket.1] = i;
     }
 }
 
@@ -364,7 +295,7 @@ fn measure_p1_kernel<F: Float>(
 ) {
     let state = (CUBE_POS_X << 10) + UNIT_POS_X;
     prob[state] = if (state & target_mask) == target_mask {
-        state_real[state] * state_real[state] + state_imag[state] * -state_imag[state]
+        state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
     } else {
         F::new(0.0)
     }

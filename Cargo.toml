@@ -43,7 +43,3 @@ crate-type = ["cdylib", "rlib"]
 
 [profile.release]
 strip = true
-
-[[example]]
-name = "grover"
-required-features = ["libket/plot"]
