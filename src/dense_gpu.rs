@@ -21,13 +21,8 @@ fn compute_ket_kernel(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    offset_x: u32,
-    offset_y: u32,
 ) -> (u32, u32, bool) {
-    let ket0 = (CUBE_POS_X << offset_x)
-        + UNIT_POS_X * full_block_size
-        + (CUBE_POS_Y << offset_y)
-        + UNIT_POS_Y;
+    let ket0 = ABSOLUTE_POS_X * full_block_size + ABSOLUTE_POS_Y;
     let ket1 = ket0 + half_block_size;
 
     (ket0, ket1, ket0 & control_mask == control_mask)
@@ -40,17 +35,8 @@ fn gate_x_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-
-    offset_x: u32,
-    offset_y: u32,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0 = state_real[ket.0];
@@ -70,17 +56,8 @@ fn gate_y_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-
-    offset_x: u32,
-    offset_y: u32,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0_real = state_real[ket.0];
@@ -101,17 +78,8 @@ fn gate_z_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-
-    offset_x: u32,
-    offset_y: u32,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         state_real[ket.1] = -state_real[ket.1];
@@ -127,17 +95,9 @@ fn gate_h_kernel<F: Float>(
     half_block_size: u32,
     full_block_size: u32,
 
-    offset_x: u32,
-    offset_y: u32,
     frac_1_sqrt_2: F,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0_real = state_real[ket.0];
@@ -188,18 +148,10 @@ fn gate_p_kernel<F: Float>(
     half_block_size: u32,
     full_block_size: u32,
 
-    offset_x: u32,
-    offset_y: u32,
     angle_real: F,
     angle_imag: F,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         complex_mul_kernel::<F>(
@@ -221,18 +173,10 @@ fn gate_rx_kernel<F: Float>(
     half_block_size: u32,
     full_block_size: u32,
 
-    offset_x: u32,
-    offset_y: u32,
     cos_theta_2: F,
     sin_theta_2: F,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let mut ket0_cos_real = F::new(0.0);
@@ -307,18 +251,10 @@ fn gate_ry_kernel<F: Float>(
     half_block_size: u32,
     full_block_size: u32,
 
-    offset_x: u32,
-    offset_y: u32,
     cos_theta_2: F,
     sin_theta_2: F,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let mut ket0_cos_real = F::new(0.0);
@@ -393,18 +329,10 @@ fn gate_rz_kernel<F: Float>(
     half_block_size: u32,
     full_block_size: u32,
 
-    offset_x: u32,
-    offset_y: u32,
     angle_real: F,
     angle_imag: F,
 ) {
-    let ket = compute_ket_kernel(
-        control_mask,
-        half_block_size,
-        full_block_size,
-        offset_x,
-        offset_y,
-    );
+    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         complex_mul_kernel::<F>(
@@ -463,7 +391,7 @@ fn measure_collapse_kernel<F: Float>(
     };
 }
 
-fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, CubeDim, u32, u32) {
+fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, CubeDim) {
     let half_block_size = 1u32 << target;
     let full_block_size = half_block_size << 1;
     let num_blocks = 1u32 << (num_qubits - target - 1);
@@ -472,30 +400,24 @@ fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, 
     let mut cube_count_y = 1;
     let mut cube_dim_x = num_blocks;
     let mut cube_dim_y = half_block_size;
-    let mut offset_x = 0;
-    let mut offset_y = 0;
 
     while cube_dim_x * cube_dim_y > 1024 {
         if cube_dim_x > cube_dim_y {
             cube_dim_x >>= 1;
             cube_count_x <<= 1;
-            offset_x += 1;
         } else {
             cube_dim_y >>= 1;
             cube_count_y <<= 1;
-            offset_y += 1;
         }
     }
 
-    //println!("num_qubits={num_qubits}, target={target} => half_block_size={half_block_size}, full_block_size={full_block_size}, num_blocks={num_blocks}, cube_count=({cube_count_x}, {cube_count_y}), cube_dim=({cube_dim_x}, {cube_dim_y}), offset=({offset_x}, {offset_y})");
+    //println!("num_qubits={num_qubits}, target={target} => half_block_size={half_block_size}, full_block_size={full_block_size}, num_blocks={num_blocks}, cube_count=({cube_count_x}, {cube_count_y}), cube_dim=({cube_dim_x}, {cube_dim_y})");
 
     (
         half_block_size,
         full_block_size,
         CubeCount::new_2d(cube_count_x, cube_count_y),
         CubeDim::new_2d(cube_dim_x, cube_dim_y),
-        offset_x,
-        offset_y,
     )
 }
 
@@ -536,7 +458,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
         //println!("Call X {target}");
 
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_x_kernel::launch_unchecked::<F, R>(
@@ -548,8 +470,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
             );
         }
 
@@ -559,7 +479,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_y_kernel::launch_unchecked::<F, R>(
@@ -571,14 +491,12 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
             );
         }
     }
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_z_kernel::launch_unchecked::<F, R>(
@@ -590,14 +508,12 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
             );
         }
     }
 
     fn hadamard(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_h_kernel::launch_unchecked::<F, R>(
@@ -609,15 +525,13 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
                 ScalarArg::new(F::new(FRAC_1_SQRT_2)),
             );
         }
     }
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_p_kernel::launch_unchecked::<F, R>(
@@ -629,8 +543,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
                 ScalarArg::new(F::new(lambda.cos() as f32)),
                 ScalarArg::new(F::new(lambda.sin() as f32)),
             );
@@ -638,7 +550,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_rx_kernel::launch_unchecked::<F, R>(
@@ -650,8 +562,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
                 ScalarArg::new(F::new(-(theta / 2.0).sin() as f32)),
             );
@@ -659,7 +569,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_ry_kernel::launch_unchecked::<F, R>(
@@ -671,8 +581,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
                 ScalarArg::new(F::new((theta / 2.0).sin() as f32)),
             );
@@ -680,7 +588,7 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
     }
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim, offset_x, offset_y) =
+        let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
             gate_rz_kernel::launch_unchecked::<F, R>(
@@ -692,8 +600,6 @@ impl<R: Runtime, F: Float + CubeElement> QuantumExecution for DenseGPU<R, F> {
                 ScalarArg::new(compute_control_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-                ScalarArg::new(offset_x),
-                ScalarArg::new(offset_y),
                 ScalarArg::new(F::new((theta / 2.0).cos() as f32)),
                 ScalarArg::new(F::new((theta / 2.0).sin() as f32)),
             );
