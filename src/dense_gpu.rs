@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
+    bitwise::get_ctrl_mask,
     quantum_execution::{ExecutionFeatures, QuantumExecution},
     FloatOps,
 };
@@ -358,14 +359,6 @@ fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, 
     )
 }
 
-fn compute_control_mask(control: &[usize]) -> u32 {
-    let mut control_mask = 0u32;
-    for c in control {
-        control_mask |= 1 << c;
-    }
-    control_mask
-}
-
 impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
@@ -404,7 +397,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
             );
@@ -425,7 +418,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
             );
@@ -442,7 +435,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
             );
@@ -459,7 +452,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::FRAC_1_SQRT_2()),
@@ -477,7 +470,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from(lambda.cos()).unwrap()),
@@ -496,7 +489,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
@@ -515,7 +508,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
@@ -534,7 +527,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 cube_dim,
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(compute_control_mask(control)),
+                ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),

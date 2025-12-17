@@ -4,12 +4,12 @@
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
-use kbw::DenseSimulator;
+use kbw::DenseV2Simulator;
 use ket::prelude::*;
 
 fn main() -> Result<(), KetError> {
     let size = 12;
-    let (target, execution) = DenseSimulator::configuration(size, false, None, None, None, false);
+    let (target, execution) = DenseV2Simulator::configuration(size, false, None, None, None, false);
 
     let mut process = Process::new(target, execution);
 

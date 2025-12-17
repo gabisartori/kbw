@@ -70,11 +70,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                *amp = current_state[if ctrl_check(state, control) {
+                *amp = current_state[if (state & ctrl_mask) == ctrl_mask {
                     bit_flip(state, target)
                 } else {
                     state
@@ -85,11 +87,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp = current_state[bit_flip(state, target)]
                         * if is_one_at(state, target) {
                             Complex::<F>::i()
@@ -105,11 +109,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) && is_one_at(state, target) {
+                if (state & ctrl_mask) == ctrl_mask && is_one_at(state, target) {
                     *amp = -current_state[state];
                 } else {
                     *amp = current_state[state];
@@ -120,11 +126,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn hadamard(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp = current_state[bit_flip(state, target)] * F::FRAC_1_SQRT_2();
                 } else {
                     *amp = Complex::<F>::zero();
@@ -135,7 +143,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp *= if is_one_at(state, target) {
                         -F::FRAC_1_SQRT_2()
                     } else {
@@ -157,11 +165,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
 
         let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) && is_one_at(state, target) {
+                if (state & ctrl_mask) == ctrl_mask && is_one_at(state, target) {
                     *amp = current_state[state] * phase;
                 } else {
                     *amp = current_state[state];
@@ -175,11 +185,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
         let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
         let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp = current_state[bit_flip(state, target)] * sin_theta_2;
                 } else {
                     *amp = Complex::<F>::zero();
@@ -190,7 +202,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp *= cons_theta_2;
                 }
             });
@@ -210,11 +222,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
         let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
         let m_sin_theta_2 = -p_sin_theta_2;
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp = current_state[bit_flip(state, target)]
                         * if is_one_at(state, target) {
                             p_sin_theta_2
@@ -230,7 +244,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp *= cons_theta_2;
                 }
             });
@@ -249,11 +263,13 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
         let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
         let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
 
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if ctrl_check(state, control) {
+                if (state & ctrl_mask) == ctrl_mask {
                     *amp = current_state[state]
                         * if is_one_at(state, target) {
                             phase_1

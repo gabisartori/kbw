@@ -26,6 +26,7 @@ impl<F: FloatOps> DenseV2<F> {
     {
         let half_block_size = 1 << target;
         let full_block_size = half_block_size << 1;
+        let ctrl_mask: usize = get_ctrl_mask(control);
 
         let inner_gate =
             |chunk_id: usize, (upper, lower): (&mut [Complex<F>], &mut [Complex<F>])| {
@@ -34,7 +35,7 @@ impl<F: FloatOps> DenseV2<F> {
                     .zip(lower.par_iter_mut())
                     .enumerate()
                     .for_each(|(index, op)| {
-                        if ctrl_check(chunk_id * full_block_size + index, control) {
+                        if ((chunk_id * full_block_size + index) & ctrl_mask) == ctrl_mask {
                             gate_impl(op);
                         }
                     });
@@ -172,12 +173,13 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     }
 
     fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
+        let state_mask = 1 << target;
         let p1 = self
             .0
             .par_iter()
             .enumerate()
             .map(|(state, amp)| {
-                if is_one_at(state, target) {
+                if state & state_mask == state_mask {
                     amp.norm().powi(2)
                 } else {
                     F::zero()
@@ -198,7 +200,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
         let p = F::one() / F::sqrt(if result { p1 } else { p0 });
 
         self.0.par_iter_mut().enumerate().for_each(|(state, amp)| {
-            *amp = if is_one_at(state, target) == result {
+            *amp = if (state & state_mask == state_mask) == result {
                 *amp * p
             } else {
                 Complex::<F>::zero()
