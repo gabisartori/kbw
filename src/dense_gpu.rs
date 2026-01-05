@@ -3,12 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    bitwise::get_ctrl_mask,
+    bitwise::{get_ctrl_mask, is_one_at},
     quantum_execution::{ExecutionFeatures, QuantumExecution},
     FloatOps,
 };
 use cubecl::prelude::*;
-use ket::execution::Capability;
+use itertools::Itertools;
+use ket::{
+    execution::Capability,
+    prelude::{Hamiltonian, Pauli},
+    process::DumpData,
+};
 use rand::distr::weighted::WeightedIndex;
 use rand::prelude::*;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -71,11 +76,11 @@ fn gate_y_kernel<F: Float>(
         let old0_real = state_real[ket.0];
         let old0_imag = state_imag[ket.0];
 
-        state_real[ket.0] = -state_imag[ket.1];
-        state_imag[ket.0] = state_real[ket.1];
+        state_real[ket.0] = state_imag[ket.1];
+        state_imag[ket.0] = -state_real[ket.1];
 
-        state_real[ket.1] = old0_imag;
-        state_imag[ket.1] = -old0_real;
+        state_real[ket.1] = -old0_imag;
+        state_imag[ket.1] = old0_real;
     }
 }
 
@@ -102,7 +107,6 @@ fn gate_h_kernel<F: Float>(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-
     frac_1_sqrt_2: F,
 ) {
     let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
@@ -300,7 +304,7 @@ fn measure_p1_kernel<F: Float>(
     prob: &mut Array<F>,
     target_mask: u32,
 ) {
-    let state = (CUBE_POS_X << 10) + UNIT_POS_X;
+    let state = ABSOLUTE_POS_X;
     prob[state] = if (state & target_mask) == target_mask {
         state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
     } else {
@@ -316,7 +320,7 @@ fn measure_collapse_kernel<F: Float>(
     result: u32,
     p: F,
 ) {
-    let state = (CUBE_POS_X << 10) + UNIT_POS_X;
+    let state = ABSOLUTE_POS_X;
     state_real[state] = if (state & target_mask) == result {
         state_real[state] * p
     } else {
@@ -349,14 +353,50 @@ fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, 
         }
     }
 
-    //println!("num_qubits={num_qubits}, target={target} => half_block_size={half_block_size}, full_block_size={full_block_size}, num_blocks={num_blocks}, cube_count=({cube_count_x}, {cube_count_y}), cube_dim=({cube_dim_x}, {cube_dim_y})");
-
     (
         half_block_size,
         full_block_size,
         CubeCount::new_2d(cube_count_x, cube_count_y),
         CubeDim::new_2d(cube_dim_x, cube_dim_y),
     )
+}
+
+#[cube(launch_unchecked)]
+fn init_state_kernel<F: Float>(state_real: &mut Array<F>, state_imag: &mut Array<F>) {
+    state_real[ABSOLUTE_POS_X] = if ABSOLUTE_POS_X == 0 {
+        F::new(1.0)
+    } else {
+        F::new(0.0)
+    };
+    state_imag[ABSOLUTE_POS_X] = F::new(0.0);
+}
+
+#[cube]
+pub fn parity_u32(x: u32) -> u32 {
+    let mut v = x;
+    v ^= v >> 16;
+    v ^= v >> 8;
+    v ^= v >> 4;
+    v ^= v >> 2;
+    v ^= v >> 1;
+    v & 1
+}
+
+#[cube(launch_unchecked)]
+fn exp_value_kernel<F: Float>(
+    state_real: &Array<F>,
+    state_imag: &Array<F>,
+    prob: &mut Array<F>,
+    target_mask: u32,
+) {
+    let state = ABSOLUTE_POS_X;
+    prob[state] = if parity_u32(state & target_mask) == 1 {
+        F::new(-1.0)
+    } else {
+        F::new(1.0)
+    } * state_real[state]
+        * state_real[state]
+        + state_imag[state] * state_imag[state];
 }
 
 impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
@@ -368,12 +408,24 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         let client = R::client(&device);
 
         let state_size = 1usize << num_qubits;
-        let mut data = vec![F::new(0.0); state_size];
+        let state_real = client.empty(state_size * core::mem::size_of::<F>());
+        let state_imag = client.empty(state_size * core::mem::size_of::<F>());
 
-        let state_imag = client.create(F::as_bytes(&data));
+        let (cube_count, cube_dim) = if num_qubits <= 10 {
+            (1, state_size)
+        } else {
+            (1 << (num_qubits - 10), 1024)
+        };
 
-        data[0] = F::new(1.0);
-        let state_real = client.create(F::as_bytes(&data));
+        unsafe {
+            init_state_kernel::launch_unchecked::<F, R>(
+                &client,
+                CubeCount::new_1d(cube_count as u32),
+                CubeDim::new_1d(cube_dim as u32),
+                ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
+                ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
+            )
+        }
 
         Ok(DenseGPU {
             state_real,
@@ -386,8 +438,6 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
-        //println!("Call X {target}");
-
         let (half_block_size, full_block_size, cube_count, cube_dim) =
             compute_cube_size(self.num_qubits, target);
         unsafe {
@@ -402,10 +452,6 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(full_block_size),
             );
         }
-
-        //let state_real = self.client.read_one(self.state_real.clone());
-        //let state_real = F::from_bytes(&state_real);
-        //println!("state_real={state_real:?}")
     }
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
@@ -564,16 +610,12 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         let prob = self.client.read_one(prob);
         let prob = F::from_bytes(&prob);
 
-        //println!("prob={prob:?}");
-
         let p1: F = prob.par_iter().copied().sum();
 
         let p0 = match F::one() - p1 {
             p0 if p0 >= F::zero() => p0,
             _ => F::zero(),
         };
-
-        //println!("P0={p0}; P1={p1}; target={target}");
 
         let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
             .unwrap()
@@ -598,17 +640,121 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         result
     }
 
-    fn dump(&mut self, _qubits: &[usize]) -> ket::process::DumpData {
-        todo!()
+    fn dump(&mut self, qubits: &[usize]) -> DumpData {
+        let state_real = self.client.read_one(self.state_real.clone());
+        let state_real = F::from_bytes(&state_real);
+        let state_imag = self.client.read_one(self.state_imag.clone());
+        let state_imag = F::from_bytes(&state_imag);
+
+        let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<_>, Vec<_>) = state_real
+            .iter()
+            .zip(state_imag)
+            .enumerate()
+            .filter(|(_state, (r, i))| {
+                (**r * **r + **i * **i).sqrt() > F::from(F::small_epsilon()).unwrap()
+            })
+            .map(|(state, (r, i))| {
+                let state = qubits
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, qubit)| (is_one_at(state, *qubit) as usize) << index)
+                    .reduce(|a, b| a | b)
+                    .unwrap_or(0);
+
+                (
+                    Vec::from([state as u64]),
+                    r.to_f64().unwrap(),
+                    i.to_f64().unwrap(),
+                )
+            })
+            .multiunzip();
+
+        DumpData {
+            basis_states,
+            amplitudes_real,
+            amplitudes_imag,
+        }
+    }
+
+    fn exp_value(&mut self, hamiltonian: &Hamiltonian<usize>) -> f64 {
+        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
+            (1, self.state_size)
+        } else {
+            (1 << (self.num_qubits - 10), 1024)
+        };
+
+        hamiltonian
+            .products
+            .iter()
+            .map(|pauli_terms| {
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    Pauli::PauliX => self.hadamard(term.qubit, &[]),
+                    Pauli::PauliY => {
+                        self.phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[]);
+                        self.hadamard(term.qubit, &[]);
+                    }
+                    Pauli::PauliZ => {}
+                });
+
+                let prob = self
+                    .client
+                    .empty(self.state_size * core::mem::size_of::<F>());
+
+                let mut target_mask = 0;
+                for q in pauli_terms.iter().map(|term| term.qubit) {
+                    target_mask |= 1 << q;
+                }
+
+                unsafe {
+                    exp_value_kernel::launch_unchecked::<F, R>(
+                        &self.client,
+                        CubeCount::new_1d(cube_count as u32),
+                        CubeDim::new_1d(cube_dim as u32),
+                        ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
+                        ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
+                        ArrayArg::from_raw_parts::<F>(&prob, self.state_size, 1),
+                        ScalarArg::new(target_mask),
+                    );
+                }
+
+                let prob = self.client.read_one(prob);
+                let prob = F::from_bytes(&prob);
+
+                let result: F = prob.par_iter().copied().sum();
+
+                pauli_terms.iter().for_each(|term| match term.pauli {
+                    Pauli::PauliX => self.hadamard(term.qubit, &[]),
+                    Pauli::PauliY => {
+                        self.hadamard(term.qubit, &[]);
+                        self.phase(std::f64::consts::FRAC_PI_2, term.qubit, &[])
+                    }
+                    Pauli::PauliZ => {}
+                });
+
+                result.to_f64().unwrap()
+            })
+            .zip(&hamiltonian.coefficients)
+            .map(|(result, coefficient)| result * *coefficient)
+            .sum()
     }
 
     fn clear(&mut self) {
-        let mut data = vec![F::new(0.0); self.state_size];
+        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
+            (1, self.state_size)
+        } else {
+            (1 << (self.num_qubits - 10), 1024)
+        };
 
-        self.state_imag = self.client.create(F::as_bytes(&data));
-
-        data[0] = F::new(1.0);
-        self.state_real = self.client.create(F::as_bytes(&data));
+        unsafe {
+            init_state_kernel::launch_unchecked::<F, R>(
+                &self.client,
+                CubeCount::new_1d(cube_count as u32),
+                CubeDim::new_1d(cube_dim as u32),
+                ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
+                ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
+            )
+        }
     }
 
     fn save(&self) -> Vec<u8> {
@@ -626,15 +772,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseG
     }
 
     fn feature_sample() -> Capability {
-        Capability::Unsupported
+        Capability::Advanced
     }
 
     fn feature_exp_value() -> Capability {
-        Capability::Unsupported
+        Capability::Advanced
     }
 
     fn feature_dump() -> Capability {
-        Capability::Unsupported
+        Capability::Advanced
     }
 
     fn feature_need_decomposition() -> bool {

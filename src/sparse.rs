@@ -127,7 +127,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state_flipped) {
                     Some(c_amp) => {
                         *c_amp += amp;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state_flipped);
                         }
                     }
@@ -145,7 +145,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state) {
                     Some(c_amp) => {
                         *c_amp += amp;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state);
                         }
                     }
@@ -184,7 +184,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state_flipped) {
                     Some(c_amp) => {
                         *c_amp += amp * sin_theta_2;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state_flipped);
                         }
                     }
@@ -196,7 +196,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state) {
                     Some(c_amp) => {
                         *c_amp += amp * cons_theta_2;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state);
                         }
                     }
@@ -230,7 +230,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state_flipped) {
                     Some(c_amp) => {
                         *c_amp += flipped_amp;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state_flipped);
                         }
                     }
@@ -242,7 +242,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 match next_state.get_mut(&state) {
                     Some(c_amp) => {
                         *c_amp += amp * cons_theta_2;
-                        if c_amp.norm() < F::from(1e-15).unwrap() {
+                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
                             next_state.remove(&state);
                         }
                     }

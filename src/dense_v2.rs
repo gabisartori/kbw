@@ -215,7 +215,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
             .0
             .iter()
             .enumerate()
-            .filter(|(_state, amp)| amp.norm() > F::from(1e-15).unwrap())
+            .filter(|(_state, amp)| amp.norm() > F::from(F::small_epsilon()).unwrap())
             .map(|(state, amp)| {
                 let state = qubits
                     .iter()

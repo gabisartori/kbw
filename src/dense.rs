@@ -328,7 +328,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
         let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<f64>, Vec<f64>) = state
             .iter()
             .enumerate()
-            .filter(|(_state, amp)| amp.norm() > F::from(1e-15).unwrap())
+            .filter(|(_state, amp)| amp.norm() > F::from(F::small_epsilon()).unwrap())
             .map(|(state, amp)| {
                 let state = qubits
                     .iter()
