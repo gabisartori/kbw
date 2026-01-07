@@ -56,10 +56,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
-            )
+            );
         }
 
-        Ok(DenseGPU {
+        Ok(Self {
             state_real,
             state_imag,
             state_size,
@@ -296,7 +296,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                     .iter()
                     .rev()
                     .enumerate()
-                    .map(|(index, qubit)| (is_one_at(state, *qubit) as usize) << index)
+                    .map(|(index, qubit)| usize::from(is_one_at(state, *qubit)) << index)
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 
@@ -365,7 +365,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                     Pauli::PauliX => self.hadamard(term.qubit, &[]),
                     Pauli::PauliY => {
                         self.hadamard(term.qubit, &[]);
-                        self.phase(std::f64::consts::FRAC_PI_2, term.qubit, &[])
+                        self.phase(std::f64::consts::FRAC_PI_2, term.qubit, &[]);
                     }
                     Pauli::PauliZ => {}
                 });
@@ -391,7 +391,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-            )
+            );
         }
     }
 
