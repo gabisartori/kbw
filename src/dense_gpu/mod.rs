@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+mod kernel;
+
 use crate::{
     bitwise::{get_ctrl_mask, is_one_at},
     quantum_execution::{ExecutionFeatures, QuantumExecution},
@@ -29,376 +31,6 @@ pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps> {
     _f: PhantomData<F>,
 }
 
-#[cube]
-fn compute_ket_kernel(
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-) -> (u32, u32, bool) {
-    let ket0 = ABSOLUTE_POS_X * full_block_size + ABSOLUTE_POS_Y;
-    let ket1 = ket0 + half_block_size;
-
-    (ket0, ket1, ket0 & control_mask == control_mask)
-}
-
-#[cube(launch_unchecked)]
-fn gate_x_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let old0 = state_real[ket.0];
-        state_real[ket.0] = state_real[ket.1];
-        state_real[ket.1] = old0;
-
-        let old0 = state_imag[ket.0];
-        state_imag[ket.0] = state_imag[ket.1];
-        state_imag[ket.1] = old0;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_y_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let old0_real = state_real[ket.0];
-        let old0_imag = state_imag[ket.0];
-
-        state_real[ket.0] = state_imag[ket.1];
-        state_imag[ket.0] = -state_real[ket.1];
-
-        state_real[ket.1] = -old0_imag;
-        state_imag[ket.1] = old0_real;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_z_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        state_real[ket.1] = -state_real[ket.1];
-        state_imag[ket.1] = -state_imag[ket.1];
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_h_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-    frac_1_sqrt_2: F,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let old0_real = state_real[ket.0];
-        let old0_imag = state_imag[ket.0];
-
-        let old1_real = state_real[ket.1];
-        let old1_imag = state_imag[ket.1];
-
-        state_real[ket.0] = (old0_real + old1_real) * frac_1_sqrt_2;
-        state_imag[ket.0] = (old0_imag + old1_imag) * frac_1_sqrt_2;
-
-        state_real[ket.1] = (old0_real - old1_real) * frac_1_sqrt_2;
-        state_imag[ket.1] = (old0_imag - old1_imag) * frac_1_sqrt_2;
-    }
-}
-
-#[cube]
-fn complex_mul_kernel<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
-    (
-        lhs_real * rhs_real - lhs_imag * rhs_imag,
-        lhs_real * rhs_imag + lhs_imag * rhs_real,
-    )
-}
-
-#[cube]
-fn complex_add_kernel<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
-    (lhs_real + rhs_real, lhs_imag + rhs_imag)
-}
-
-#[cube(launch_unchecked)]
-fn gate_p_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-
-    angle_real: F,
-    angle_imag: F,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let (r, i) =
-            complex_mul_kernel::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_rx_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-
-    cos_theta_2: F,
-    sin_theta_2: F,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let (ket0_cos_real, ket0_cos_imag) = complex_mul_kernel::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_sin_real, ket1_sin_imag) = complex_mul_kernel::<F>(
-            F::new(0.0),
-            sin_theta_2,
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (ket0_sin_real, ket0_sin_imag) = complex_mul_kernel::<F>(
-            F::new(0.0),
-            sin_theta_2,
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_cos_real, ket1_cos_imag) = complex_mul_kernel::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (r, i) =
-            complex_add_kernel::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
-        state_real[ket.0] = r;
-        state_imag[ket.0] = i;
-
-        let (r, i) =
-            complex_add_kernel::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_ry_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-
-    cos_theta_2: F,
-    sin_theta_2: F,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let (ket0_cos_real, ket0_cos_imag) = complex_mul_kernel::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_sin_real, ket1_sin_imag) = complex_mul_kernel::<F>(
-            -sin_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (ket0_sin_real, ket0_sin_imag) = complex_mul_kernel::<F>(
-            sin_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_cos_real, ket1_cos_imag) = complex_mul_kernel::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (r, i) =
-            complex_add_kernel::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
-        state_real[ket.0] = r;
-        state_imag[ket.0] = i;
-
-        let (r, i) =
-            complex_add_kernel::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn gate_rz_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    control_mask: u32,
-    half_block_size: u32,
-    full_block_size: u32,
-    angle_real: F,
-    angle_imag: F,
-) {
-    let ket = compute_ket_kernel(control_mask, half_block_size, full_block_size);
-
-    if ket.2 {
-        let (r, i) = complex_mul_kernel::<F>(
-            state_real[ket.0],
-            state_imag[ket.0],
-            angle_real,
-            -angle_imag,
-        );
-        state_real[ket.0] = r;
-        state_imag[ket.0] = i;
-
-        let (r, i) =
-            complex_mul_kernel::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
-    }
-}
-
-#[cube(launch_unchecked)]
-fn measure_p1_kernel<F: Float>(
-    state_real: &Array<F>,
-    state_imag: &Array<F>,
-    prob: &mut Array<F>,
-    target_mask: u32,
-) {
-    let state = ABSOLUTE_POS_X;
-    prob[state] = if (state & target_mask) == target_mask {
-        state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
-    } else {
-        F::new(0.0)
-    }
-}
-
-#[cube(launch_unchecked)]
-fn measure_collapse_kernel<F: Float>(
-    state_real: &mut Array<F>,
-    state_imag: &mut Array<F>,
-    target_mask: u32,
-    result: u32,
-    p: F,
-) {
-    let state = ABSOLUTE_POS_X;
-    state_real[state] = if (state & target_mask) == result {
-        state_real[state] * p
-    } else {
-        F::new(0.0)
-    };
-    state_imag[state] = if (state & target_mask) == result {
-        state_imag[state] * p
-    } else {
-        F::new(0.0)
-    };
-}
-
-fn compute_cube_size(num_qubits: usize, target: usize) -> (u32, u32, CubeCount, CubeDim) {
-    let half_block_size = 1u32 << target;
-    let full_block_size = half_block_size << 1;
-    let num_blocks = 1u32 << (num_qubits - target - 1);
-
-    let mut cube_count_x = 1;
-    let mut cube_count_y = 1;
-    let mut cube_dim_x = num_blocks;
-    let mut cube_dim_y = half_block_size;
-
-    while cube_dim_x * cube_dim_y > 1024 {
-        if cube_dim_x > cube_dim_y {
-            cube_dim_x >>= 1;
-            cube_count_x <<= 1;
-        } else {
-            cube_dim_y >>= 1;
-            cube_count_y <<= 1;
-        }
-    }
-
-    (
-        half_block_size,
-        full_block_size,
-        CubeCount::new_2d(cube_count_x, cube_count_y),
-        CubeDim::new_2d(cube_dim_x, cube_dim_y),
-    )
-}
-
-#[cube(launch_unchecked)]
-fn init_state_kernel<F: Float>(state_real: &mut Array<F>, state_imag: &mut Array<F>) {
-    state_real[ABSOLUTE_POS_X] = if ABSOLUTE_POS_X == 0 {
-        F::new(1.0)
-    } else {
-        F::new(0.0)
-    };
-    state_imag[ABSOLUTE_POS_X] = F::new(0.0);
-}
-
-#[cube]
-pub fn parity_u32(x: u32) -> u32 {
-    let mut v = x;
-    v ^= v >> 16;
-    v ^= v >> 8;
-    v ^= v >> 4;
-    v ^= v >> 2;
-    v ^= v >> 1;
-    v & 1
-}
-
-#[cube(launch_unchecked)]
-fn exp_value_kernel<F: Float>(
-    state_real: &Array<F>,
-    state_imag: &Array<F>,
-    prob: &mut Array<F>,
-    target_mask: u32,
-) {
-    let state = ABSOLUTE_POS_X;
-    prob[state] = if parity_u32(state & target_mask) == 1 {
-        F::new(-1.0)
-    } else {
-        F::new(1.0)
-    } * state_real[state]
-        * state_real[state]
-        + state_imag[state] * state_imag[state];
-}
-
 impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
@@ -418,7 +50,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         };
 
         unsafe {
-            init_state_kernel::launch_unchecked::<F, R>(
+            kernel::init_state::launch_unchecked::<F, R>(
                 &client,
                 CubeCount::new_1d(cube_count as u32),
                 CubeDim::new_1d(cube_dim as u32),
@@ -439,9 +71,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_x_kernel::launch_unchecked::<F, R>(
+            kernel::gate_x::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -456,9 +88,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_y_kernel::launch_unchecked::<F, R>(
+            kernel::gate_y::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -473,9 +105,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_z_kernel::launch_unchecked::<F, R>(
+            kernel::gate_z::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -490,9 +122,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn hadamard(&mut self, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_h_kernel::launch_unchecked::<F, R>(
+            kernel::gate_h::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -508,9 +140,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_p_kernel::launch_unchecked::<F, R>(
+            kernel::gate_p::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -527,9 +159,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_rx_kernel::launch_unchecked::<F, R>(
+            kernel::gate_rx::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -546,9 +178,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_ry_kernel::launch_unchecked::<F, R>(
+            kernel::gate_ry::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -565,9 +197,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (half_block_size, full_block_size, cube_count, cube_dim) =
-            compute_cube_size(self.num_qubits, target);
+            kernel::compute_cube_size(self.num_qubits, target);
         unsafe {
-            gate_rz_kernel::launch_unchecked::<F, R>(
+            kernel::gate_rz::launch_unchecked::<F, R>(
                 &self.client,
                 cube_count,
                 cube_dim,
@@ -583,27 +215,27 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 
     fn measure<RNG: rand::Rng>(&mut self, target: usize, rng: &mut RNG) -> bool {
-        let prob = self
-            .client
-            .empty(self.state_size * core::mem::size_of::<F>());
+        let prob_size = 1 << (self.num_qubits - 1);
+        let prob = self.client.empty(prob_size * core::mem::size_of::<F>());
 
-        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
-            (1, self.state_size)
+        let (cube_count, cube_dim) = if self.num_qubits <= 11 {
+            (1, prob_size)
         } else {
-            (1 << (self.num_qubits - 10), 1024)
+            (1 << (self.num_qubits - 11), 1024)
         };
 
-        let target_mask = 1 << target;
+        let mask = (1 << target) - 1;
 
         unsafe {
-            measure_p1_kernel::launch_unchecked::<F, R>(
+            kernel::measure_p1::launch_unchecked::<F, R>(
                 &self.client,
                 CubeCount::new_1d(cube_count as u32),
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&prob, self.state_size, 1),
-                ScalarArg::new(target_mask),
+                ArrayArg::from_raw_parts::<F>(&prob, prob_size, 1),
+                ScalarArg::new(target as u32),
+                ScalarArg::new(mask),
             );
         }
 
@@ -624,15 +256,21 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
         let p = F::one() / <F as num_traits::Float>::sqrt(if result { p1 } else { p0 });
 
+        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
+            (1, self.state_size)
+        } else {
+            (1 << (self.num_qubits - 10), 1024)
+        };
+
         unsafe {
-            measure_collapse_kernel::launch_unchecked::<F, R>(
+            kernel::measure_collapse::launch_unchecked::<F, R>(
                 &self.client,
                 CubeCount::new_1d(cube_count as u32),
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-                ScalarArg::new(target_mask),
-                ScalarArg::new(if result { target_mask } else { 0 }),
+                ScalarArg::new(mask),
+                ScalarArg::new(if result { mask } else { 0 }),
                 ScalarArg::new(p),
             );
         }
@@ -707,7 +345,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 }
 
                 unsafe {
-                    exp_value_kernel::launch_unchecked::<F, R>(
+                    kernel::exp_value::launch_unchecked::<F, R>(
                         &self.client,
                         CubeCount::new_1d(cube_count as u32),
                         CubeDim::new_1d(cube_dim as u32),
@@ -747,7 +385,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         };
 
         unsafe {
-            init_state_kernel::launch_unchecked::<F, R>(
+            kernel::init_state::launch_unchecked::<F, R>(
                 &self.client,
                 CubeCount::new_1d(cube_count as u32),
                 CubeDim::new_1d(cube_dim as u32),
