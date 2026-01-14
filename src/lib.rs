@@ -47,7 +47,5 @@ impl FloatOps for f64 {
 pub type DenseSimulator = quantum_execution::QubitManager<dense::Dense<f32>>;
 pub type DenseGPUSimulator =
     quantum_execution::QubitManager<dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>>;
-pub type DenseSIMDSimulator =
-    quantum_execution::QubitManager<dense_gpu::DenseGPU<cubecl::cpu::CpuRuntime, f32>>;
 pub type DenseV2Simulator = quantum_execution::QubitManager<dense_v2::DenseV2<f32>>;
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse<f32>>;

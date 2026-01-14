@@ -34,7 +34,7 @@ serde_json = "1.0.145"
 indexmap = "2.12.1"
 num-traits = "0.2"
 
-cubecl = { version = "0.8.1", features = ["wgpu", "cpu"] }
+cubecl = { version = "0.8.1", features = ["wgpu"] }
 
 [build-dependencies]
 build-info-build = "0.0.42"
