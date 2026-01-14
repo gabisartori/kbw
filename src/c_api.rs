@@ -54,9 +54,10 @@ pub mod error {
         }
     }
 
-    pub fn wrapper(error: Result<()>) -> i32 {
+    #[must_use]
+    pub const fn wrapper(error: Result<()>) -> i32 {
         match error {
-            Ok(_) => KBWError::Success.error_code(),
+            Ok(()) => KBWError::Success.error_code(),
             Err(error) => error.error_code(),
         }
     }
@@ -83,11 +84,11 @@ pub unsafe extern "C" fn kbw_make_configuration(
         Some(coupling_graph.to_vec())
     };
 
-    let classical_shadows = if !classical_shadows.is_null() {
+    let classical_shadows = if classical_shadows.is_null() {
+        None
+    } else {
         let cs = unsafe { std::slice::from_raw_parts(classical_shadows, 5) };
         Some(((cs[0] as u8, cs[1] as u8, cs[2] as u8), cs[3], cs[4]))
-    } else {
-        None
     };
 
     let sample_base = if sample_base == 0 {
@@ -138,7 +139,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
 const BUILD_INFO: &str = build_info::format!("{} v{} [{} {}]", $.crate_info.name, $.crate_info.version, $.compiler, $.target);
 
 #[no_mangle]
-pub extern "C" fn kbw_build_info(msg: &mut *const u8, size: &mut usize) -> i32 {
+pub const extern "C" fn kbw_build_info(msg: &mut *const u8, size: &mut usize) -> i32 {
     let bytes = BUILD_INFO.as_bytes();
     *size = bytes.len();
     *msg = bytes.as_ptr();

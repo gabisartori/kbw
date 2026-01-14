@@ -17,7 +17,7 @@ pub(crate) fn get_ctrl_mask<T: Integer + BitOrAssign + Shl<usize, Output = T>>(
     control_mask
 }
 
-pub(crate) fn bit_flip(state: usize, index: usize) -> usize {
+pub(crate) const fn bit_flip(state: usize, index: usize) -> usize {
     state ^ (1 << index)
 }
 
@@ -27,7 +27,7 @@ pub(crate) fn bit_flip_vec(mut state: Vec<u64>, index: usize) -> Vec<u64> {
     state
 }
 
-pub(crate) fn is_one_at(state: usize, target: usize) -> bool {
+pub(crate) const fn is_one_at(state: usize, target: usize) -> bool {
     state & (1 << target) != 0
 }
 

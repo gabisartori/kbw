@@ -6,9 +6,12 @@
 use crate::error::Result;
 use crate::quantum_execution::QuantumExecution;
 use crate::FloatOps;
-use crate::{bitwise::*, quantum_execution::ExecutionFeatures};
+use crate::{
+    bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec},
+    quantum_execution::ExecutionFeatures,
+};
 use itertools::Itertools;
-use ket::execution::*;
+use ket::execution::Capability;
 use ket::process::DumpData;
 use num::complex::Complex;
 use num::One;
@@ -30,7 +33,7 @@ pub struct Sparse<F: FloatOps> {
 }
 
 impl<F: FloatOps> Sparse<F> {
-    fn get_states(&mut self) -> (&mut StateMap<F>, &mut StateMap<F>) {
+    const fn get_states(&mut self) -> (&mut StateMap<F>, &mut StateMap<F>) {
         self.state = !self.state;
         if self.state {
             (&mut self.state_1, &mut self.state_0)
@@ -39,7 +42,7 @@ impl<F: FloatOps> Sparse<F> {
         }
     }
 
-    fn get_current_state_mut(&mut self) -> &mut StateMap<F> {
+    const fn get_current_state_mut(&mut self) -> &mut StateMap<F> {
         if self.state {
             &mut self.state_0
         } else {
@@ -47,7 +50,7 @@ impl<F: FloatOps> Sparse<F> {
         }
     }
 
-    fn get_current_state(&self) -> &StateMap<F> {
+    const fn get_current_state(&self) -> &StateMap<F> {
         if self.state {
             &self.state_0
         } else {
@@ -66,7 +69,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
         state_0.insert(zero, Complex::<F>::one());
 
-        Ok(Sparse {
+        Ok(Self {
             state_0,
             state_1: StateMap::<F>::default(),
             state: true,
@@ -324,7 +327,9 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                         qubits
                             .into_iter()
                             .enumerate()
-                            .map(|(index, qubit)| (is_one_at_vec(state, *qubit) as usize) << index)
+                            .map(|(index, qubit)| {
+                                usize::from(is_one_at_vec(state, *qubit)) << index
+                            })
                             .reduce(|a, b| a | b)
                             .unwrap_or(0) as u64
                     })
