@@ -4,12 +4,9 @@
 
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
-use crate::{
-    bitwise::{get_ctrl_mask, is_one_at},
-    FloatOps,
-};
+use crate::{bitwise::*, FloatOps};
 use itertools::Itertools;
-use ket::execution::Capability;
+use ket::execution::*;
 use ket::process::DumpData;
 use log::error;
 use num::Zero;
@@ -68,7 +65,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
         state.resize(num_states, Complex::<F>::zero());
         state[0] = Complex::<F>::one();
 
-        Ok(Self(state))
+        Ok(DenseV2(state))
     }
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
@@ -224,7 +221,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
                     .iter()
                     .rev()
                     .enumerate()
-                    .map(|(index, qubit)| usize::from(is_one_at(state, *qubit)) << index)
+                    .map(|(index, qubit)| (is_one_at(state, *qubit) as usize) << index)
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 

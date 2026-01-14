@@ -36,7 +36,7 @@ pub(super) fn compute_cube_size(
 }
 
 #[cube]
-pub(super) const fn compute_ket(
+pub(super) fn compute_ket(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
@@ -340,7 +340,7 @@ pub(super) fn init_state<F: Float>(state_real: &mut Array<F>, state_imag: &mut A
 }
 
 #[cube]
-pub(super) const fn parity_u32(x: u32) -> u32 {
+pub(super) fn parity_u32(x: u32) -> u32 {
     let mut v = x;
     v ^= v >> 16;
     v ^= v >> 8;

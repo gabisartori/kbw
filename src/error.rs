@@ -44,18 +44,16 @@ pub type Result<T> = result::Result<T, KBWError>;
 
 impl KBWError {
     /// Returns the error code as an integer.
-    #[must_use]
-    pub const fn error_code(&self) -> i32 {
+    pub fn error_code(&self) -> i32 {
         *self as i32
     }
 
-    /// Converts an error code into a `KBWError`.
+    /// Converts an error code into a KBWError.
     ///
     /// # Safety
     ///
     /// This function is unsafe because it assumes that the error code is valid.
-    #[must_use]
-    pub unsafe fn from_error_code(error_code: i32) -> Self {
+    pub unsafe fn from_error_code(error_code: i32) -> KBWError {
         unsafe { std::mem::transmute(error_code) }
     }
 }

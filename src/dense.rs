@@ -5,12 +5,9 @@
 
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
-use crate::{
-    bitwise::{bit_flip, get_ctrl_mask, is_one_at},
-    FloatOps,
-};
+use crate::{bitwise::*, FloatOps};
 use itertools::Itertools;
-use ket::execution::Capability;
+use ket::execution::*;
 use ket::process::DumpData;
 use log::error;
 use num::complex::Complex;
@@ -62,7 +59,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
 
         state_0[0] = Complex::<F>::one();
 
-        Ok(Self {
+        Ok(Dense {
             state: true,
             state_0,
             state_1,
@@ -337,7 +334,7 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
                     .iter()
                     .rev()
                     .enumerate()
-                    .map(|(index, qubit)| usize::from(is_one_at(state, *qubit)) << index)
+                    .map(|(index, qubit)| (is_one_at(state, *qubit) as usize) << index)
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 

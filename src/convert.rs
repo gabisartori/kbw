@@ -22,7 +22,7 @@ pub(crate) fn from_dump_to_prob(data: DumpData) -> DumpProbability {
         .amplitudes_real
         .par_iter()
         .zip(&data.amplitudes_imag)
-        .map(|(real, imag)| Complex64::new(*real, *imag).abs().powi(2))
+        .map(|(real, imag)| Complex64::new(*real, *imag).abs().powf(2.0))
         .collect();
 
     DumpProbability {

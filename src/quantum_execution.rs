@@ -9,13 +9,7 @@ use ket::ir::instructions::Instruction;
 use ket::ir::qubit::{LogicalQubit, Qubit};
 use ket::prelude::*;
 use ket::process::Sample;
-use ket::{
-    execution::{
-        BatchExecution, Capability, ExecutionProtocol, ExpValueStrategy, Gradient, LiveExecution,
-        ResultData,
-    },
-    process::DumpData,
-};
+use ket::{execution::*, process::DumpData};
 use num::Integer;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::f64::consts::FRAC_PI_2;
@@ -87,7 +81,7 @@ pub trait QuantumExecution {
                     Pauli::PauliX => self.hadamard(term.qubit, &[]),
                     Pauli::PauliY => {
                         self.hadamard(term.qubit, &[]);
-                        self.phase(FRAC_PI_2, term.qubit, &[]);
+                        self.phase(FRAC_PI_2, term.qubit, &[])
                     }
                     Pauli::PauliZ => {}
                 });
@@ -129,7 +123,7 @@ impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
             .parse::<u64>()
             .unwrap_or_else(|_| rand::random());
 
-        Ok(Self {
+        Ok(QubitManager {
             simulator: S::new(num_qubits)?,
             rng: StdRng::seed_from_u64(seed),
             results: Default::default(),
@@ -137,7 +131,6 @@ impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
         })
     }
 
-    #[must_use]
     pub fn configuration(
         num_qubits: usize,
         use_live: bool,
@@ -209,17 +202,17 @@ impl<S: QuantumExecution> QubitManager<S> {
     fn gate(&mut self, gate: QuantumGate, target: usize, control: &[usize]) {
         match gate {
             QuantumGate::RotationX(theta) => {
-                self.simulator.rx(self.get_param(theta), target, control);
+                self.simulator.rx(self.get_param(theta), target, control)
             }
             QuantumGate::RotationY(theta) => {
-                self.simulator.ry(self.get_param(theta), target, control);
+                self.simulator.ry(self.get_param(theta), target, control)
             }
             QuantumGate::RotationZ(theta) => {
-                self.simulator.rz(self.get_param(theta), target, control);
+                self.simulator.rz(self.get_param(theta), target, control)
             }
             QuantumGate::Phase(lambda) => {
                 self.simulator
-                    .phase(self.get_param(lambda), target, control);
+                    .phase(self.get_param(lambda), target, control)
             }
             QuantumGate::Hadamard => self.simulator.hadamard(target, control),
             QuantumGate::PauliX => self.simulator.pauli_x(target, control),
@@ -233,7 +226,7 @@ impl<S: QuantumExecution> QubitManager<S> {
             .iter()
             .rev()
             .enumerate()
-            .map(|(index, qubit)| u64::from(self.simulator.measure(*qubit, &mut self.rng)) << index)
+            .map(|(index, qubit)| (self.simulator.measure(*qubit, &mut self.rng) as u64) << index)
             .reduce(|a, b| a | b)
             .unwrap_or(0);
 
@@ -256,18 +249,12 @@ impl<S: QuantumExecution> QubitManager<S> {
 
 impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
     fn gate(&mut self, gate: QuantumGate, target: LogicalQubit, control: &[LogicalQubit]) {
-        let control = control
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
-        self.gate(gate, target.index(), &control);
+        let control = control.iter().map(|qubit| qubit.index()).collect_vec();
+        self.gate(gate, target.index(), &control)
     }
 
     fn measure(&mut self, qubits: &[LogicalQubit]) -> u64 {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
+        let qubits = qubits.iter().map(|qubit| qubit.index()).collect_vec();
         self.measure(&qubits)
     }
 
@@ -276,18 +263,12 @@ impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
     }
 
     fn sample(&mut self, qubits: &[LogicalQubit], shots: usize) -> Sample {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
+        let qubits = qubits.iter().map(|qubit| qubit.index()).collect_vec();
         self.sample(&qubits, shots)
     }
 
     fn dump(&mut self, qubits: &[LogicalQubit]) -> DumpData {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
+        let qubits = qubits.iter().map(|qubit| qubit.index()).collect_vec();
         self.dump(&qubits)
     }
 
