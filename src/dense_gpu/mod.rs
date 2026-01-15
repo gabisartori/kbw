@@ -262,6 +262,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
             (1 << (self.num_qubits - 10), 1024)
         };
 
+        let mask = 1 << target;
         unsafe {
             kernel::measure_collapse::launch_unchecked::<F, R>(
                 &self.client,
