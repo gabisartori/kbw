@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::blocking::BlockingSimulator;
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use crate::{
@@ -14,8 +15,6 @@ use ket::process::DumpData;
 use log::error;
 use num::Zero;
 use num::{Complex, One};
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -64,8 +63,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
         }
 
         let num_states = 1 << num_qubits;
-        let mut state = Vec::new();
-        state.resize(num_states, Complex::<F>::zero());
+        let mut state = vec![Complex::<F>::zero(); num_states];
         state[0] = Complex::<F>::one();
 
         Ok(Self(state))
@@ -175,10 +173,9 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
         );
     }
 
-    fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
+    fn measure_p1(&mut self, target: usize) -> f64 {
         let state_mask = 1 << target;
-        let p1 = self
-            .0
+        self.0
             .par_iter()
             .enumerate()
             .map(|(state, amp)| {
@@ -188,29 +185,21 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
                     F::zero()
                 }
             })
-            .sum();
-
-        let p0 = match F::one() - p1 {
-            p0 if p0 >= F::zero() => p0,
-            _ => F::zero(),
-        };
-
-        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .sum::<F>()
+            .to_f64()
             .unwrap()
-            .sample(rng)
-            == 1;
+    }
 
-        let p = F::one() / F::sqrt(if result { p1 } else { p0 });
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
+        let state_mask = 1 << target;
 
         self.0.par_iter_mut().enumerate().for_each(|(state, amp)| {
             *amp = if (state & state_mask == state_mask) == result {
-                *amp * p
+                *amp * F::from(p).unwrap()
             } else {
                 Complex::<F>::zero()
             };
         });
-
-        result
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
@@ -284,5 +273,37 @@ impl<F: FloatOps> ExecutionFeatures for DenseV2<F> {
 
     fn supports_gradient() -> bool {
         false
+    }
+}
+
+impl<F: FloatOps> BlockingSimulator<Self> for DenseV2<F> {
+    fn new_zero(num_qubits: usize) -> Result<Self> {
+        let num_states = 1 << num_qubits;
+        let state = vec![Complex::<F>::zero(); num_states];
+        Ok(Self(state))
+    }
+
+    fn swap(
+        simulators: &mut [Self],
+        num_global_qubits: usize,
+        num_local_qubits: usize,
+        global_qubit: usize,
+        local_qubit: usize,
+    ) {
+        let mut new_states =
+            vec![vec![Complex::<F>::zero(); 1 << num_local_qubits]; 1 << num_global_qubits];
+
+        new_states
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(global_index, global)| {
+                global
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(local_index, state)| {
+                        *state = simulators[global_index ^ (1 << global_qubit)].0
+                            [local_index ^ (1 << local_qubit)];
+                    });
+            });
     }
 }

@@ -9,6 +9,7 @@ use std::{
 };
 
 pub mod bitwise;
+pub mod blocking;
 pub mod c_api;
 pub mod convert;
 pub mod dense;
@@ -45,7 +46,13 @@ impl FloatOps for f64 {
 }
 
 pub type DenseSimulator = quantum_execution::QubitManager<dense::Dense<f32>>;
+
 pub type DenseGPUSimulator =
     quantum_execution::QubitManager<dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>>;
+
 pub type DenseV2Simulator = quantum_execution::QubitManager<dense_v2::DenseV2<f32>>;
+
+pub type DenseV2BlockingSimulator =
+    quantum_execution::QubitManager<blocking::Blocking<dense_v2::DenseV2<f32>>>;
+
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse<f32>>;

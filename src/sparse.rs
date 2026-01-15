@@ -15,8 +15,6 @@ use ket::execution::Capability;
 use ket::process::DumpData;
 use num::complex::Complex;
 use num::One;
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -276,10 +274,10 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
         });
     }
 
-    fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
-        let (current_state, next_state) = self.get_states();
+    fn measure_p1(&mut self, target: usize) -> f64 {
+        let current_state = self.get_current_state();
 
-        let p1 = current_state
+        current_state
             .iter()
             .map(|(state, amp)| {
                 if is_one_at_vec(state, target) {
@@ -288,27 +286,19 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                     F::zero()
                 }
             })
-            .sum();
-
-        let p0 = match F::one() - p1 {
-            p0 if p0 >= F::zero() => p0,
-            _ => F::zero(),
-        };
-
-        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .sum::<F>()
+            .to_f64()
             .unwrap()
-            .sample(rng)
-            == 1;
+    }
 
-        let p = F::one() / F::sqrt(if result { p1 } else { p0 });
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
+        let (current_state, next_state) = self.get_states();
 
         current_state.drain().for_each(|(state, amp)| {
             if is_one_at_vec(&state, target) == result {
-                next_state.insert(state, amp * p);
+                next_state.insert(state, amp * F::from(p).unwrap());
             }
         });
-
-        result
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {

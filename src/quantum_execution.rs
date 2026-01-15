@@ -17,6 +17,8 @@ use ket::{
     process::DumpData,
 };
 use num::Integer;
+use rand::distr::weighted::WeightedIndex;
+use rand::distr::Distribution;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::f64::consts::FRAC_PI_2;
 
@@ -36,7 +38,8 @@ pub trait QuantumExecution {
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]);
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]);
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
-    fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool;
+    fn measure_p1(&mut self, target: usize) -> f64;
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64);
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
 
     fn gradients(&mut self) -> Option<Vec<f64>> {
@@ -233,7 +236,17 @@ impl<S: QuantumExecution> QubitManager<S> {
             .iter()
             .rev()
             .enumerate()
-            .map(|(index, qubit)| u64::from(self.simulator.measure(*qubit, &mut self.rng)) << index)
+            .map(|(index, qubit)| {
+                let p1 = self.simulator.measure_p1(*qubit);
+                let p0 = match 1.0 - p1 {
+                    p0 if p0 >= 0.0 => p0,
+                    _ => 0.0,
+                };
+                let result = WeightedIndex::new([p0, p1]).unwrap().sample(&mut self.rng);
+                let p = 1.0 / f64::sqrt(if result == 1 { p1 } else { p0 });
+                self.simulator.measure_collapse(*qubit, result == 1, p);
+                (result << index) as u64
+            })
             .reduce(|a, b| a | b)
             .unwrap_or(0);
 

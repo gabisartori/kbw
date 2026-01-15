@@ -16,8 +16,6 @@ use ket::{
     prelude::{Hamiltonian, Pauli},
     process::DumpData,
 };
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::*;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::marker::PhantomData;
 
@@ -214,7 +212,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         }
     }
 
-    fn measure<RNG: rand::Rng>(&mut self, target: usize, rng: &mut RNG) -> bool {
+    fn measure_p1(&mut self, target: usize) -> f64 {
         let prob_size = 1 << (self.num_qubits - 1);
         let prob = self.client.empty(prob_size * core::mem::size_of::<F>());
 
@@ -242,20 +240,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         let prob = self.client.read_one(prob);
         let prob = F::from_bytes(&prob);
 
-        let p1: F = prob.par_iter().copied().sum();
+        prob.par_iter().copied().sum::<F>().to_f64().unwrap()
+    }
 
-        let p0 = match F::one() - p1 {
-            p0 if p0 >= F::zero() => p0,
-            _ => F::zero(),
-        };
-
-        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
-            .unwrap()
-            .sample(rng)
-            == 1;
-
-        let p = F::one() / <F as num_traits::Float>::sqrt(if result { p1 } else { p0 });
-
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
         let (cube_count, cube_dim) = if self.num_qubits <= 10 {
             (1, self.state_size)
         } else {
@@ -263,6 +251,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         };
 
         let mask = 1 << target;
+
         unsafe {
             kernel::measure_collapse::launch_unchecked::<F, R>(
                 &self.client,
@@ -272,11 +261,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
                 ScalarArg::new(mask),
                 ScalarArg::new(if result { mask } else { 0 }),
-                ScalarArg::new(p),
+                ScalarArg::new(F::from(p).unwrap()),
             );
         }
-
-        result
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {

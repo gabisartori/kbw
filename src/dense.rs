@@ -15,8 +15,6 @@ use ket::process::DumpData;
 use log::error;
 use num::complex::Complex;
 use num::{One, Zero};
-use rand::distr::weighted::WeightedIndex;
-use rand::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -285,10 +283,10 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
             });
     }
 
-    fn measure<R: Rng>(&mut self, target: usize, rng: &mut R) -> bool {
-        let (current_state, next_state) = self.get_states();
+    fn measure_p1(&mut self, target: usize) -> f64 {
+        let current_state = self.get_current_state();
 
-        let p1: F = current_state
+        current_state
             .par_iter()
             .enumerate()
             .map(|(state, amp)| {
@@ -298,32 +296,24 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
                     F::zero()
                 }
             })
-            .sum();
-
-        let p0 = match F::one() - p1 {
-            p0 if p0 >= F::zero() => p0,
-            _ => F::zero(),
-        };
-
-        let result = WeightedIndex::new([p0.to_f64().unwrap(), p1.to_f64().unwrap()])
+            .sum::<F>()
+            .to_f64()
             .unwrap()
-            .sample(rng)
-            == 1;
+    }
 
-        let p = F::one() / F::sqrt(if result { p1 } else { p0 });
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
+        let (current_state, next_state) = self.get_states();
 
         next_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
                 *amp = if is_one_at(state, target) == result {
-                    current_state[state] * p
+                    current_state[state] * F::from(p).unwrap()
                 } else {
                     Complex::<F>::zero()
                 };
             });
-
-        result
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
