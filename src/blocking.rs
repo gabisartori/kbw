@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use ket::process::DumpData;
+
+use crate::{
+    bitwise::bit_at,
+    quantum_execution::{ExecutionFeatures, QuantumExecution},
+};
 
 pub trait BlockingSimulator<S: QuantumExecution> {
     fn new_zero(num_qubits: usize) -> crate::error::Result<S>;
@@ -48,7 +53,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
     }
 
     const fn is_local(&self, qubit: usize) -> bool {
-        qubit < (1 << self.num_local_qubits)
+        qubit < self.num_local_qubits
     }
 
     fn get_local_qubit(&mut self, qubit: usize) -> usize {
@@ -216,6 +221,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
     }
 
     fn measure_p1(&mut self, target: usize) -> f64 {
+        self.execute_gates();
         let target = self.get_local_qubit(target);
         self.simulators
             .iter_mut()
@@ -230,8 +236,75 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
         }
     }
 
-    fn dump(&mut self, _qubits: &[usize]) -> ket::process::DumpData {
-        todo!()
+    fn dump(&mut self, qubits: &[usize]) -> ket::process::DumpData {
+        self.execute_gates();
+        let mut local_qubits = Vec::new();
+        let mut local_qubits_index = Vec::new();
+        let mut global_qubits = Vec::new();
+        let mut global_qubits_index = Vec::new();
+
+        for (i, q) in qubits.iter().enumerate() {
+            let q = self.logical_qubit_map[*q];
+            if self.is_local(q) {
+                local_qubits.push(q);
+                local_qubits_index.push(i);
+            } else {
+                global_qubits.push(q >> self.num_local_qubits);
+                global_qubits_index.push(i);
+            }
+        }
+
+        let mut global_dump = DumpData::default();
+
+        for (global, s) in self.simulators.iter_mut().enumerate() {
+            let dump = s.dump(&local_qubits);
+
+            let global_state = global_qubits_index
+                .iter()
+                .zip(global_qubits.iter())
+                .map(|(at, index)| bit_at(global, *index, *at))
+                .reduce(|a, b| a | b)
+                .unwrap_or(0) as u64;
+
+            for (s, (r, i)) in dump
+                .basis_states
+                .iter()
+                .zip(dump.amplitudes_real.iter().zip(dump.amplitudes_imag.iter()))
+            {
+                let new_state = local_qubits_index
+                    .iter()
+                    .zip(local_qubits.iter())
+                    .map(|(at, index)| bit_at(s[0] as usize, *index, *at))
+                    .reduce(|a, b| a | b)
+                    .unwrap_or(0) as u64
+                    | global_state;
+
+                global_dump.basis_states.push(vec![new_state]);
+                global_dump.amplitudes_real.push(*r);
+                global_dump.amplitudes_imag.push(*i);
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            use itertools::Itertools;
+
+            let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<_>, Vec<_>) =
+                global_dump
+                    .basis_states
+                    .drain(..)
+                    .zip(global_dump.amplitudes_real.drain(..))
+                    .zip(global_dump.amplitudes_imag.drain(..))
+                    .map(|((basis, real), imag)| (basis, real, imag))
+                    .sorted_by(|a, b| a.0.cmp(&b.0))
+                    .multiunzip();
+
+            global_dump.basis_states = basis_states;
+            global_dump.amplitudes_real = amplitudes_real;
+            global_dump.amplitudes_imag = amplitudes_imag;
+        }
+
+        global_dump
     }
 
     fn clear(&mut self) {
