@@ -302,12 +302,12 @@ impl<F: FloatOps> BlockingSimulator<Self> for DenseV2<F> {
                     .enumerate()
                     .for_each(|(local_index, state)| {
                         *state = if ((global_index & (1 << global_qubit)) != 0)
-                            != ((local_index & (1 << local_qubit)) != 0)
+                            == ((local_index & (1 << local_qubit)) != 0)
                         {
+                            simulators[global_index].0[local_index]
+                        } else {
                             simulators[global_index ^ (1 << global_qubit)].0
                                 [local_index ^ (1 << local_qubit)]
-                        } else {
-                            simulators[global_index].0[local_index]
                         };
                     });
             });

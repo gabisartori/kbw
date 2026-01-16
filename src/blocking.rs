@@ -153,7 +153,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
 
         let mut simulators = vec![S::new_one(num_local_qubits)?];
         for _ in 1..(1 << num_global_qubits) {
-            simulators.push(S::new_zero(num_local_qubits)?)
+            simulators.push(S::new_zero(num_local_qubits)?);
         }
 
         let logical_qubit_map: Vec<_> = (0..num_qubits).collect();
@@ -232,7 +232,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
         let target = self.get_local_qubit(target);
         for s in &mut self.simulators {
-            s.measure_collapse(target, result, p)
+            s.measure_collapse(target, result, p);
         }
     }
 
