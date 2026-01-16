@@ -62,7 +62,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
             mapped_qubit
         } else {
             self.execute_gates();
-            let global_qubit = mapped_qubit >> self.num_local_qubits;
+            let global_qubit = mapped_qubit - self.num_local_qubits;
             let local_qubit = self.get_next_local_qubit();
 
             S::swap(
@@ -92,7 +92,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
             if self.is_local(c) {
                 new_control.push(c);
             } else {
-                let c = 1usize << (c >> self.num_local_qubits);
+                let c = 1usize << (c - self.num_local_qubits);
                 for (i, s) in execute.iter_mut().enumerate() {
                     *s &= (i & c) == c;
                 }
@@ -143,10 +143,18 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
             return Err(crate::error::KBWError::UnsupportedNumberOfQubits);
         }
 
-        let block_size = std::env::var("KBW_BLOCK_SIZE")
-            .unwrap_or_default()
-            .parse::<usize>()
-            .unwrap_or(std::cmp::min(num_qubits - 1, 16));
+        let block_size = std::cmp::min(
+            num_qubits - 1,
+            std::env::var("KBW_BLOCK_SIZE")
+                .unwrap_or_default()
+                .parse::<usize>()
+                .unwrap_or(16),
+        );
+
+        #[cfg(debug_assertions)]
+        {
+            println!("\x1b[1;95mBlock Size {block_size}\x1b[0m");
+        }
 
         let num_local_qubits = block_size;
         let num_global_qubits = num_qubits - block_size;
@@ -249,7 +257,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
                 local_qubits.push(q);
                 local_qubits_index.push(i);
             } else {
-                global_qubits.push(q >> self.num_local_qubits);
+                global_qubits.push(q - self.num_local_qubits);
                 global_qubits_index.push(i);
             }
         }

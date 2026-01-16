@@ -290,6 +290,10 @@ impl<F: FloatOps> BlockingSimulator<Self> for DenseV2<F> {
         global_qubit: usize,
         local_qubit: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            println!("\x1b[1;95mBlock Data SWAP\x1b[0m global_qubit={global_qubit}, local_qubit={local_qubit}");
+        }
         let mut new_states =
             vec![vec![Complex::<F>::zero(); 1 << num_local_qubits]; 1 << num_global_qubits];
 
