@@ -412,7 +412,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseG
 }
 
 impl<R: Runtime, F: Float + CubeElement + FloatOps>
-    BlockingSimulator<DenseGPU<R, F>, (ComputeClient<R>, Handle, Handle)> for DenseGPU<R, F>
+    BlockingSimulator<Self, (ComputeClient<R>, Handle, Handle)> for DenseGPU<R, F>
 {
     fn new_blocks(
         num_local_qubits: usize,
@@ -452,7 +452,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps>
 
     fn swap(
         global_data: &mut (ComputeClient<R>, Handle, Handle),
-        simulators: &mut [DenseGPU<R, F>],
+        simulators: &mut [Self],
         num_global_qubits: usize,
         num_local_qubits: usize,
         global_qubit: usize,
@@ -481,11 +481,11 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps>
         for i in 0..cube_count_2 {
             unsafe {
                 kernel::copy_swap::launch_unchecked::<F, R>(
-                    &client,
-                    CubeCount::new_1d(cube_count as u32),
+                    client,
+                    CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim as u32),
-                    ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(state_real, state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(state_imag, state_size, 1),
                     ArrayArg::from_raw_parts::<F>(&new_state_real, state_size, 1),
                     ArrayArg::from_raw_parts::<F>(&new_state_imag, state_size, 1),
                     ScalarArg::new(i * cube_count),

@@ -292,7 +292,7 @@ impl<F: FloatOps> BlockingSimulator<Self, ()> for DenseV2<F> {
     }
 
     fn swap(
-        _: &mut (),
+        (): &mut (),
         simulators: &mut [Self],
         num_global_qubits: usize,
         num_local_qubits: usize,
