@@ -40,11 +40,15 @@ pub(super) const fn compute_ket(
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-) -> (u32, u32, bool) {
+) -> (usize, usize, bool) {
     let ket0 = (ABSOLUTE_POS_X << full_block_size) + ABSOLUTE_POS_Y;
     let ket1 = ket0 + half_block_size;
 
-    (ket0, ket1, ket0 & control_mask == control_mask)
+    (
+        ket0 as usize,
+        ket1 as usize,
+        ket0 & control_mask == control_mask,
+    )
 }
 
 #[cube(launch_unchecked)]
@@ -107,7 +111,7 @@ pub(super) fn gate_z<F: Float>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_h<F: Float>(
+pub(super) fn gate_h<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     control_mask: u32,
@@ -146,7 +150,7 @@ pub(super) fn complex_add<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_i
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_p<F: Float>(
+pub(super) fn gate_p<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     control_mask: u32,
@@ -165,7 +169,7 @@ pub(super) fn gate_p<F: Float>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_rx<F: Float>(
+pub(super) fn gate_rx<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     control_mask: u32,
@@ -216,7 +220,7 @@ pub(super) fn gate_rx<F: Float>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_ry<F: Float>(
+pub(super) fn gate_ry<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     control_mask: u32,
@@ -267,7 +271,7 @@ pub(super) fn gate_ry<F: Float>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_rz<F: Float>(
+pub(super) fn gate_rz<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     control_mask: u32,
@@ -303,13 +307,14 @@ pub(super) fn measure_p1<F: Float>(
     mask: u32,
 ) {
     let state = ((((ABSOLUTE_POS_X >> target) << 1) | 1) << target) | (ABSOLUTE_POS_X & mask);
+    let state = state as usize;
 
-    prob[ABSOLUTE_POS_X] =
+    prob[ABSOLUTE_POS_X as usize] =
         state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn measure_collapse<F: Float>(
+pub(super) fn measure_collapse<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     target_mask: u32,
@@ -317,13 +322,14 @@ pub(super) fn measure_collapse<F: Float>(
     p: F,
 ) {
     let state = ABSOLUTE_POS_X;
-    state_real[state] = if (state & target_mask) == result {
-        state_real[state] * p
+    let state_index = state as usize;
+    state_real[state_index] = if (state & target_mask) == result {
+        state_real[state_index] * p
     } else {
         F::new(0.0)
     };
-    state_imag[state] = if (state & target_mask) == result {
-        state_imag[state] * p
+    state_imag[state_index] = if (state & target_mask) == result {
+        state_imag[state_index] * p
     } else {
         F::new(0.0)
     };
@@ -331,12 +337,12 @@ pub(super) fn measure_collapse<F: Float>(
 
 #[cube(launch_unchecked)]
 pub(super) fn init_state<F: Float>(state_real: &mut Array<F>, state_imag: &mut Array<F>) {
-    state_real[ABSOLUTE_POS_X] = if ABSOLUTE_POS_X == 0 {
+    state_real[ABSOLUTE_POS_X as usize] = if ABSOLUTE_POS_X == 0 {
         F::new(1.0)
     } else {
         F::new(0.0)
     };
-    state_imag[ABSOLUTE_POS_X] = F::new(0.0);
+    state_imag[ABSOLUTE_POS_X as usize] = F::new(0.0);
 }
 
 #[cube]
@@ -358,11 +364,12 @@ pub(super) fn exp_value<F: Float>(
     target_mask: u32,
 ) {
     let state = ABSOLUTE_POS_X;
-    prob[state] = if parity_u32(state & target_mask) == 1 {
+    let state_index = state as usize;
+    prob[state_index] = if parity_u32(state & target_mask) == 1 {
         F::new(-1.0)
     } else {
         F::new(1.0)
-    } * state_real[state]
-        * state_real[state]
-        + state_imag[state] * state_imag[state];
+    } * state_real[state_index]
+        * state_real[state_index]
+        + state_imag[state_index] * state_imag[state_index];
 }

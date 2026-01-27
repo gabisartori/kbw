@@ -25,7 +25,7 @@ pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps> {
     state_size: usize,
     num_qubits: usize,
 
-    client: ComputeClient<R::Server>,
+    client: ComputeClient<R>,
     _f: PhantomData<F>,
 }
 
@@ -54,7 +54,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
-            );
+            )
+            .unwrap();
         }
 
         Ok(Self {
@@ -80,7 +81,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -97,7 +99,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -114,7 +117,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(get_ctrl_mask(control)),
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -132,7 +136,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(half_block_size),
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::FRAC_1_SQRT_2()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -151,7 +156,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from(lambda.cos()).unwrap()),
                 ScalarArg::new(F::from(lambda.sin()).unwrap()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -170,7 +176,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
                 ScalarArg::new(F::from(-(theta / 2.0).sin()).unwrap()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -189,7 +196,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
                 ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -208,7 +216,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(full_block_size),
                 ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
                 ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -234,7 +243,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ArrayArg::from_raw_parts::<F>(&prob, prob_size, 1),
                 ScalarArg::new(target as u32),
                 ScalarArg::new(mask),
-            );
+            )
+            .unwrap();
         }
 
         let prob = self.client.read_one(prob);
@@ -262,7 +272,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 ScalarArg::new(mask),
                 ScalarArg::new(if result { mask } else { 0 }),
                 ScalarArg::new(F::from(p).unwrap()),
-            );
+            )
+            .unwrap();
         }
     }
 
@@ -277,7 +288,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
             .zip(state_imag)
             .enumerate()
             .filter(|(_state, (r, i))| {
-                (**r * **r + **i * **i).sqrt() > F::from(F::small_epsilon()).unwrap()
+                cubecl::frontend::Sqrt::sqrt(**r * **r + **i * **i)
+                    > F::from(F::small_epsilon()).unwrap()
             })
             .map(|(state, (r, i))| {
                 let state = qubits
@@ -341,7 +353,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                         ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
                         ArrayArg::from_raw_parts::<F>(&prob, self.state_size, 1),
                         ScalarArg::new(target_mask),
-                    );
+                    )
+                    .unwrap();
                 }
 
                 let prob = self.client.read_one(prob);
@@ -379,7 +392,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                 CubeDim::new_1d(cube_dim as u32),
                 ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
                 ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-            );
+            )
+            .unwrap();
         }
     }
 
