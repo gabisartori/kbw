@@ -335,16 +335,6 @@ pub(super) fn measure_collapse<F: Float + LaunchArg>(
     };
 }
 
-#[cube(launch_unchecked)]
-pub(super) fn init_state<F: Float>(state_real: &mut Array<F>, state_imag: &mut Array<F>) {
-    state_real[ABSOLUTE_POS_X as usize] = if ABSOLUTE_POS_X == 0 {
-        F::new(1.0)
-    } else {
-        F::new(0.0)
-    };
-    state_imag[ABSOLUTE_POS_X as usize] = F::new(0.0);
-}
-
 #[cube]
 pub(super) const fn parity_u32(x: u32) -> u32 {
     let mut v = x;
@@ -372,4 +362,28 @@ pub(super) fn exp_value<F: Float>(
     } * state_real[state_index]
         * state_real[state_index]
         + state_imag[state_index] * state_imag[state_index];
+}
+
+#[cube(launch_unchecked)]
+pub(super) fn copy_swap<F: Float>(
+    old_state_real: &Array<F>,
+    old_state_imag: &Array<F>,
+    new_state_real: &mut Array<F>,
+    new_state_imag: &mut Array<F>,
+    offset: u32,
+    global_index: u32,
+    local_index: u32,
+) {
+    let state = ABSOLUTE_POS_X + offset;
+    let new_state = if ((state & global_index) != 0) == ((state & local_index) != 0) {
+        state
+    } else {
+        (state ^ global_index) ^ local_index
+    };
+
+    let state = state as usize;
+    let new_state = new_state as usize;
+
+    new_state_real[new_state] = old_state_real[state];
+    new_state_imag[new_state] = old_state_imag[state];
 }

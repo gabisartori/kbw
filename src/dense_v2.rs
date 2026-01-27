@@ -276,14 +276,23 @@ impl<F: FloatOps> ExecutionFeatures for DenseV2<F> {
     }
 }
 
-impl<F: FloatOps> BlockingSimulator<Self> for DenseV2<F> {
-    fn new_zero(num_qubits: usize) -> Result<Self> {
-        let num_states = 1 << num_qubits;
-        let state = vec![Complex::<F>::zero(); num_states];
-        Ok(Self(state))
+impl<F: FloatOps> BlockingSimulator<Self, ()> for DenseV2<F> {
+    fn new_blocks(
+        num_local_qubits: usize,
+        num_global_qubits: usize,
+    ) -> crate::error::Result<(Vec<Self>, ())> {
+        let mut simulators = vec![Self::new(num_local_qubits)?];
+        let num_states = 1 << num_local_qubits;
+
+        for _ in 1..(1 << num_global_qubits) {
+            simulators.push(Self(vec![Complex::<F>::zero(); num_states]));
+        }
+
+        Ok((simulators, ()))
     }
 
     fn swap(
+        _: &mut (),
         simulators: &mut [Self],
         num_global_qubits: usize,
         num_local_qubits: usize,

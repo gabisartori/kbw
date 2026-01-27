@@ -53,6 +53,6 @@ pub type DenseGPUSimulator =
 pub type DenseV2Simulator = quantum_execution::QubitManager<dense_v2::DenseV2<f32>>;
 
 pub type DenseV2BlockingSimulator =
-    quantum_execution::QubitManager<blocking::Blocking<dense_v2::DenseV2<f32>>>;
+    quantum_execution::QubitManager<blocking::Blocking<(), dense_v2::DenseV2<f32>>>;
 
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse<f32>>;

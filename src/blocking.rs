@@ -9,14 +9,14 @@ use crate::{
     quantum_execution::{ExecutionFeatures, QuantumExecution},
 };
 
-pub trait BlockingSimulator<S: QuantumExecution> {
-    fn new_zero(num_qubits: usize) -> crate::error::Result<S>;
-
-    fn new_one(num_qubits: usize) -> crate::error::Result<S> {
-        S::new(num_qubits)
-    }
+pub trait BlockingSimulator<S: QuantumExecution, G> {
+    fn new_blocks(
+        num_local_qubits: usize,
+        num_global_qubits: usize,
+    ) -> crate::error::Result<(Vec<S>, G)>;
 
     fn swap(
+        global_data: &mut G,
         simulators: &mut [S],
         num_global_qubits: usize,
         num_local_qubits: usize,
@@ -36,16 +36,17 @@ enum Gate {
     RZ(f64),
 }
 
-pub struct Blocking<S: QuantumExecution + BlockingSimulator<S>> {
+pub struct Blocking<G, S: QuantumExecution + BlockingSimulator<S, G>> {
     num_global_qubits: usize,
     num_local_qubits: usize,
     simulators: Vec<S>,
+    global_data: G,
     logical_qubit_map: Vec<usize>,
     next_local_qubit: usize,
     gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
 }
 
-impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
+impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
     const fn get_next_local_qubit(&mut self) -> usize {
         let qubit = self.next_local_qubit;
         self.next_local_qubit = (qubit + 1) % self.num_local_qubits;
@@ -66,6 +67,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
             let local_qubit = self.get_next_local_qubit();
 
             S::swap(
+                &mut self.global_data,
                 &mut self.simulators,
                 self.num_global_qubits,
                 self.num_local_qubits,
@@ -134,7 +136,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> Blocking<S> {
     }
 }
 
-impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S> {
+impl<G, S: QuantumExecution + BlockingSimulator<S, G>> QuantumExecution for Blocking<G, S> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
         Self: Sized,
@@ -159,10 +161,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
         let num_local_qubits = block_size;
         let num_global_qubits = num_qubits - block_size;
 
-        let mut simulators = vec![S::new_one(num_local_qubits)?];
-        for _ in 1..(1 << num_global_qubits) {
-            simulators.push(S::new_zero(num_local_qubits)?);
-        }
+        let (simulators, global_data) = S::new_blocks(num_local_qubits, num_global_qubits)?;
 
         let logical_qubit_map: Vec<_> = (0..num_qubits).collect();
 
@@ -170,6 +169,7 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
             num_global_qubits,
             num_local_qubits,
             simulators,
+            global_data,
             logical_qubit_map,
             next_local_qubit: 0,
             gate_queue: Vec::new(),
@@ -331,8 +331,8 @@ impl<S: QuantumExecution + BlockingSimulator<S>> QuantumExecution for Blocking<S
     }
 }
 
-impl<S: QuantumExecution + BlockingSimulator<S> + ExecutionFeatures> ExecutionFeatures
-    for Blocking<S>
+impl<G, S: QuantumExecution + BlockingSimulator<S, G> + ExecutionFeatures> ExecutionFeatures
+    for Blocking<G, S>
 {
     fn feature_measure() -> ket::execution::Capability {
         S::feature_measure()

@@ -6,10 +6,11 @@ mod kernel;
 
 use crate::{
     bitwise::{get_ctrl_mask, is_one_at},
+    blocking::BlockingSimulator,
     quantum_execution::{ExecutionFeatures, QuantumExecution},
     FloatOps,
 };
-use cubecl::prelude::*;
+use cubecl::{prelude::*, server::Handle};
 use itertools::Itertools;
 use ket::{
     execution::Capability,
@@ -38,25 +39,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         let client = R::client(&device);
 
         let state_size = 1usize << num_qubits;
-        let state_real = client.empty(state_size * core::mem::size_of::<F>());
-        let state_imag = client.empty(state_size * core::mem::size_of::<F>());
-
-        let (cube_count, cube_dim) = if num_qubits <= 10 {
-            (1, state_size)
-        } else {
-            (1 << (num_qubits - 10), 1024)
-        };
-
-        unsafe {
-            kernel::init_state::launch_unchecked::<F, R>(
-                &client,
-                CubeCount::new_1d(cube_count as u32),
-                CubeDim::new_1d(cube_dim as u32),
-                ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
-            )
-            .unwrap();
-        }
+        let mut state = vec![F::zero(); state_size];
+        let state_imag = client.create_from_slice(F::as_bytes(&state));
+        state[0] = F::one();
+        let state_real = client.create_from_slice(F::as_bytes(&state));
 
         Ok(Self {
             state_real,
@@ -379,22 +365,11 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 
     fn clear(&mut self) {
-        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
-            (1, self.state_size)
-        } else {
-            (1 << (self.num_qubits - 10), 1024)
-        };
-
-        unsafe {
-            kernel::init_state::launch_unchecked::<F, R>(
-                &self.client,
-                CubeCount::new_1d(cube_count as u32),
-                CubeDim::new_1d(cube_dim as u32),
-                ArrayArg::from_raw_parts::<F>(&self.state_real, self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag, self.state_size, 1),
-            )
-            .unwrap();
-        }
+        let state_size = 1usize << self.num_qubits;
+        let mut state = vec![F::zero(); state_size];
+        self.state_imag = self.client.create_from_slice(F::as_bytes(&state));
+        state[0] = F::one();
+        self.state_real = self.client.create_from_slice(F::as_bytes(&state));
     }
 
     fn save(&self) -> Vec<u8> {
@@ -433,5 +408,103 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseG
 
     fn supports_gradient() -> bool {
         false
+    }
+}
+
+impl<R: Runtime, F: Float + CubeElement + FloatOps>
+    BlockingSimulator<DenseGPU<R, F>, (ComputeClient<R>, Handle, Handle)> for DenseGPU<R, F>
+{
+    fn new_blocks(
+        num_local_qubits: usize,
+        num_global_qubits: usize,
+    ) -> crate::error::Result<(Vec<Self>, (ComputeClient<R>, Handle, Handle))> {
+        let num_qubits = num_local_qubits + num_global_qubits;
+
+        let device = Default::default();
+        let client = R::client(&device);
+
+        let state_size = 1usize << num_qubits;
+        let mut state = vec![F::zero(); state_size];
+        let state_imag = client.create_from_slice(F::as_bytes(&state));
+        state[0] = F::one();
+        let state_real = client.create_from_slice(F::as_bytes(&state));
+
+        let mut simulators = Vec::new();
+
+        let sub_state_size = 1 << num_local_qubits;
+        for i in 0..(1 << num_global_qubits) {
+            let offset = (i * sub_state_size * core::mem::size_of::<F>()) as u64;
+            let sub_state_real = state_real.clone().offset_start(offset);
+            let sub_state_imag = state_imag.clone().offset_start(offset);
+
+            simulators.push(Self {
+                state_real: sub_state_real,
+                state_imag: sub_state_imag,
+                state_size: sub_state_size,
+                num_qubits: num_local_qubits,
+                client: client.clone(),
+                _f: PhantomData,
+            });
+        }
+
+        Ok((simulators, (client, state_real, state_imag)))
+    }
+
+    fn swap(
+        global_data: &mut (ComputeClient<R>, Handle, Handle),
+        simulators: &mut [DenseGPU<R, F>],
+        num_global_qubits: usize,
+        num_local_qubits: usize,
+        global_qubit: usize,
+        local_qubit: usize,
+    ) {
+        let num_qubits = num_local_qubits + num_global_qubits;
+        let state_size = 1usize << num_qubits;
+
+        let (client, state_real, state_imag) = global_data;
+
+        let new_state_real = client.empty(state_size * core::mem::size_of::<F>());
+        let new_state_imag = client.empty(state_size * core::mem::size_of::<F>());
+
+        let (cube_count, cube_dim) = if num_qubits <= 10 {
+            (1, state_size)
+        } else {
+            (1 << (num_qubits - 10), 1024)
+        };
+
+        let (cube_count_2, cube_count) = if cube_count <= (1 << 24) {
+            (1, cube_count)
+        } else {
+            (cube_count >> 24, 1 << 24)
+        };
+
+        for i in 0..cube_count_2 {
+            unsafe {
+                kernel::copy_swap::launch_unchecked::<F, R>(
+                    &client,
+                    CubeCount::new_1d(cube_count as u32),
+                    CubeDim::new_1d(cube_dim as u32),
+                    ArrayArg::from_raw_parts::<F>(&state_real, state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&state_imag, state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&new_state_real, state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&new_state_imag, state_size, 1),
+                    ScalarArg::new(i * cube_count),
+                    ScalarArg::new(1 << (global_qubit + num_local_qubits)),
+                    ScalarArg::new(1 << (local_qubit)),
+                )
+                .unwrap();
+            }
+        }
+
+        let sub_state_size = 1 << num_local_qubits;
+
+        for i in 0..(1 << num_global_qubits) {
+            let offset = (i * sub_state_size * core::mem::size_of::<F>()) as u64;
+            let sub_state_real = new_state_real.clone().offset_start(offset);
+            let sub_state_imag = new_state_imag.clone().offset_start(offset);
+
+            simulators[i].state_real = sub_state_real;
+            simulators[i].state_imag = sub_state_imag;
+        }
     }
 }
