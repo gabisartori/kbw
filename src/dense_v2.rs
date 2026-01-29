@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 
 use crate::block::BlockSimulator;
 use crate::error::{KBWError, Result};
@@ -340,7 +340,7 @@ impl<F: FloatOps + Display> BlockSimulator<Self, ()> for DenseV2<F> {
         println!("==============");
         for (global, s) in simulators.iter().enumerate() {
             for (local, amp) in s.0.iter().enumerate() {
-                println!("{global:2>} {local:2>}: ({:.4} {:+.4})", amp.re(), amp.im());
+                println!("{global:>2} {local:<2}: ({:.4} {:+.4})", amp.re(), amp.im());
             }
         }
         println!("==============");

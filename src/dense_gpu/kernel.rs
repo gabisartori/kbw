@@ -37,17 +37,18 @@ pub(super) fn compute_cube_size(
 
 #[cube]
 pub(super) const fn compute_ket(
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
 ) -> (usize, usize, bool) {
-    let ket0 = (ABSOLUTE_POS_X << full_block_size) + ABSOLUTE_POS_Y;
-    let ket1 = ket0 + half_block_size;
+    let ket0 = offset + ((ABSOLUTE_POS_X << full_block_size) + ABSOLUTE_POS_Y) as usize;
+    let ket1 = ket0 + half_block_size as usize;
 
     (
-        ket0 as usize,
-        ket1 as usize,
-        ket0 & control_mask == control_mask,
+        ket0,
+        ket1,
+        ket0 & control_mask as usize == control_mask as usize,
     )
 }
 
@@ -55,11 +56,12 @@ pub(super) const fn compute_ket(
 pub(super) fn gate_x<F: Float>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0 = state_real[ket.0];
@@ -76,11 +78,12 @@ pub(super) fn gate_x<F: Float>(
 pub(super) fn gate_y<F: Float>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0_real = state_real[ket.0];
@@ -98,11 +101,12 @@ pub(super) fn gate_y<F: Float>(
 pub(super) fn gate_z<F: Float>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         state_real[ket.1] = -state_real[ket.1];
@@ -114,12 +118,13 @@ pub(super) fn gate_z<F: Float>(
 pub(super) fn gate_h<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
     frac_1_sqrt_2: F,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let old0_real = state_real[ket.0];
@@ -153,13 +158,14 @@ pub(super) fn complex_add<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_i
 pub(super) fn gate_p<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
     angle_real: F,
     angle_imag: F,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let (r, i) = complex_mul::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
@@ -172,13 +178,14 @@ pub(super) fn gate_p<F: Float + LaunchArg>(
 pub(super) fn gate_rx<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
     cos_theta_2: F,
     sin_theta_2: F,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let (ket0_cos_real, ket0_cos_imag) = complex_mul::<F>(
@@ -223,13 +230,14 @@ pub(super) fn gate_rx<F: Float + LaunchArg>(
 pub(super) fn gate_ry<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
     cos_theta_2: F,
     sin_theta_2: F,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let (ket0_cos_real, ket0_cos_imag) = complex_mul::<F>(
@@ -274,13 +282,14 @@ pub(super) fn gate_ry<F: Float + LaunchArg>(
 pub(super) fn gate_rz<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
     angle_real: F,
     angle_imag: F,
 ) {
-    let ket = compute_ket(control_mask, half_block_size, full_block_size);
+    let ket = compute_ket(offset, control_mask, half_block_size, full_block_size);
 
     if ket.2 {
         let (r, i) = complex_mul::<F>(
@@ -302,12 +311,13 @@ pub(super) fn gate_rz<F: Float + LaunchArg>(
 pub(super) fn measure_p1<F: Float>(
     state_real: &Array<F>,
     state_imag: &Array<F>,
+    offset: usize,
     prob: &mut Array<F>,
     target: u32,
     mask: u32,
 ) {
     let state = ((((ABSOLUTE_POS_X >> target) << 1) | 1) << target) | (ABSOLUTE_POS_X & mask);
-    let state = state as usize;
+    let state = offset + state as usize;
 
     prob[ABSOLUTE_POS_X as usize] =
         state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
@@ -317,12 +327,13 @@ pub(super) fn measure_p1<F: Float>(
 pub(super) fn measure_collapse<F: Float + LaunchArg>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
+    offset: usize,
     target_mask: u32,
     result: u32,
     p: F,
 ) {
     let state = ABSOLUTE_POS_X;
-    let state_index = state as usize;
+    let state_index = offset + state as usize;
     state_real[state_index] = if (state & target_mask) == result {
         state_real[state_index] * p
     } else {
@@ -350,11 +361,12 @@ pub(super) const fn parity_u32(x: u32) -> u32 {
 pub(super) fn exp_value<F: Float>(
     state_real: &Array<F>,
     state_imag: &Array<F>,
+    offset: usize,
     prob: &mut Array<F>,
     target_mask: u32,
 ) {
     let state = ABSOLUTE_POS_X;
-    let state_index = state as usize;
+    let state_index = offset + state as usize;
     prob[state_index] = if parity_u32(state & target_mask) == 1 {
         F::new(-1.0)
     } else {
@@ -375,15 +387,12 @@ pub(super) fn copy_swap<F: Float>(
     local_index: u32,
 ) {
     let state = ABSOLUTE_POS_X + offset;
-    let new_state = if ((state & global_index) != 0) == ((state & local_index) != 0) {
-        state
-    } else {
-        (state ^ global_index) ^ local_index
-    };
+    let global_bit = (state >> global_index) & 1;
+    let local_bit = (state >> local_index) & 1;
 
-    let state = state as usize;
-    let new_state = new_state as usize;
+    let src_state = state & !((1 << global_index) | (1 << local_index));
+    let src_state = src_state | (global_bit << local_index) | (local_bit << global_index);
 
-    new_state_real[new_state] = old_state_real[state];
-    new_state_imag[new_state] = old_state_imag[state];
+    new_state_real[state as usize] = old_state_real[src_state as usize];
+    new_state_imag[state as usize] = old_state_imag[src_state as usize];
 }

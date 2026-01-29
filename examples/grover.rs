@@ -4,13 +4,13 @@
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
-use kbw::DenseV2BlockingSimulator;
+use kbw::DenseV2BlockSimulator;
 use ket::prelude::*;
 
 fn main() -> Result<(), KetError> {
     let size = 12;
     let (target, execution) =
-        DenseV2BlockingSimulator::configuration(size, false, None, None, None, false);
+        DenseV2BlockSimulator::configuration(size, false, None, None, None, false);
 
     let mut process = Process::new(target, execution);
 
