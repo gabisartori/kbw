@@ -6,7 +6,7 @@ mod kernel;
 
 use crate::{
     bitwise::{get_ctrl_mask, is_one_at},
-    blocking::BlockingSimulator,
+    block::BlockSimulator,
     quantum_execution::{ExecutionFeatures, QuantumExecution},
     FloatOps,
 };
@@ -274,7 +274,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
             .zip(state_imag)
             .enumerate()
             .filter(|(_state, (r, i))| {
-                cubecl::frontend::Sqrt::sqrt(**r * **r + **i * **i)
+                num_traits::real::Real::sqrt(**r * **r + **i * **i)
                     > F::from(F::small_epsilon()).unwrap()
             })
             .map(|(state, (r, i))| {
@@ -412,7 +412,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseG
 }
 
 impl<R: Runtime, F: Float + CubeElement + FloatOps>
-    BlockingSimulator<Self, (ComputeClient<R>, Handle, Handle)> for DenseGPU<R, F>
+    BlockSimulator<Self, (ComputeClient<R>, Handle, Handle)> for DenseGPU<R, F>
 {
     fn new_blocks(
         num_local_qubits: usize,
@@ -458,6 +458,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps>
         global_qubit: usize,
         local_qubit: usize,
     ) {
+        #[cfg(debug_assertions)]
+        {
+            println!("\x1b[1;95mBlock Data SWAP\x1b[0m global_qubit={global_qubit}, local_qubit={local_qubit}");
+        }
         let num_qubits = num_local_qubits + num_global_qubits;
         let state_size = 1usize << num_qubits;
 

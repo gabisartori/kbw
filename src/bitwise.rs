@@ -39,7 +39,3 @@ pub(crate) fn is_one_at_vec(state: &[u64], target: usize) -> bool {
 pub(crate) fn ctrl_check_vec(state: &[u64], control: &[usize]) -> bool {
     control.iter().all(|control| is_one_at_vec(state, *control))
 }
-
-pub(crate) const fn bit_at(src: usize, index: usize, at: usize) -> usize {
-    ((src >> index) & 1) << at
-}

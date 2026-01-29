@@ -2,7 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::blocking::BlockingSimulator;
+use std::fmt::{Debug, Display};
+
+use crate::block::BlockSimulator;
 use crate::error::{KBWError, Result};
 use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 use crate::{
@@ -13,6 +15,7 @@ use itertools::Itertools;
 use ket::execution::Capability;
 use ket::process::DumpData;
 use log::error;
+use num::complex::ComplexFloat;
 use num::Zero;
 use num::{Complex, One};
 use rayon::prelude::*;
@@ -276,7 +279,7 @@ impl<F: FloatOps> ExecutionFeatures for DenseV2<F> {
     }
 }
 
-impl<F: FloatOps> BlockingSimulator<Self, ()> for DenseV2<F> {
+impl<F: FloatOps + Display> BlockSimulator<Self, ()> for DenseV2<F> {
     fn new_blocks(
         num_local_qubits: usize,
         num_global_qubits: usize,
@@ -307,26 +310,39 @@ impl<F: FloatOps> BlockingSimulator<Self, ()> for DenseV2<F> {
             vec![vec![Complex::<F>::zero(); 1 << num_local_qubits]; 1 << num_global_qubits];
 
         new_states
-            .par_iter_mut()
+            .iter_mut()
             .enumerate()
             .for_each(|(global_index, global)| {
                 global
-                    .par_iter_mut()
+                    .iter_mut()
                     .enumerate()
                     .for_each(|(local_index, state)| {
-                        *state = if ((global_index & (1 << global_qubit)) != 0)
-                            == ((local_index & (1 << local_qubit)) != 0)
-                        {
-                            simulators[global_index].0[local_index]
-                        } else {
-                            simulators[global_index ^ (1 << global_qubit)].0
-                                [local_index ^ (1 << local_qubit)]
-                        };
+                        let g_bit_pos = global_qubit;
+                        let l_bit_pos = local_qubit;
+
+                        let g_bit = (global_index >> g_bit_pos) & 1;
+                        let l_bit = (local_index >> l_bit_pos) & 1;
+
+                        let src_global = (global_index & !(1 << g_bit_pos)) | (l_bit << g_bit_pos);
+
+                        let src_local = (local_index & !(1 << l_bit_pos)) | (g_bit << l_bit_pos);
+
+                        *state = simulators[src_global].0[src_local];
                     });
             });
 
         for (s, new_state) in simulators.iter_mut().zip(new_states.drain(..)) {
             s.0 = new_state;
         }
+    }
+
+    fn print_global_state((): &(), simulators: &[Self]) {
+        println!("==============");
+        for (global, s) in simulators.iter().enumerate() {
+            for (local, amp) in s.0.iter().enumerate() {
+                println!("{global:2>} {local:2>}: ({:.4} {:+.4})", amp.re(), amp.im());
+            }
+        }
+        println!("==============");
     }
 }

@@ -9,7 +9,7 @@ use std::{
 };
 
 pub mod bitwise;
-pub mod blocking;
+pub mod block;
 pub mod c_api;
 pub mod convert;
 pub mod dense;
@@ -45,14 +45,24 @@ impl FloatOps for f64 {
     }
 }
 
-pub type DenseSimulator = quantum_execution::QubitManager<dense::Dense<f32>>;
+pub type Dense = dense::Dense<f32>;
+pub type DenseSimulator = quantum_execution::QubitManager<Dense>;
 
-pub type DenseGPUSimulator =
-    quantum_execution::QubitManager<dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>>;
+pub type DenseV2 = dense_v2::DenseV2<f32>;
+pub type DenseV2Simulator = quantum_execution::QubitManager<DenseV2>;
+pub type DenseV2Block = block::Block<(), DenseV2>;
+pub type DenseV2BlockSimulator = quantum_execution::QubitManager<DenseV2Block>;
 
-pub type DenseV2Simulator = quantum_execution::QubitManager<dense_v2::DenseV2<f32>>;
-
-pub type DenseV2BlockingSimulator =
-    quantum_execution::QubitManager<blocking::Blocking<(), dense_v2::DenseV2<f32>>>;
+pub type DenseGPU = dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>;
+pub type DenseGPUSimulator = quantum_execution::QubitManager<DenseGPU>;
+pub type DenseGPUBlock = block::Block<
+    (
+        cubecl::client::ComputeClient<cubecl::wgpu::WgpuRuntime>,
+        cubecl::server::Handle,
+        cubecl::server::Handle,
+    ),
+    dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>,
+>;
+pub type DenseGPUSBlockSimulator = quantum_execution::QubitManager<DenseGPUBlock>;
 
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse<f32>>;

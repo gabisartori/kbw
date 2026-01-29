@@ -2,14 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use bimap::BiMap;
 use ket::process::DumpData;
 
-use crate::{
-    bitwise::bit_at,
-    quantum_execution::{ExecutionFeatures, QuantumExecution},
-};
+use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
 
-pub trait BlockingSimulator<S: QuantumExecution, G> {
+pub trait BlockSimulator<S: QuantumExecution, G> {
     fn new_blocks(
         num_local_qubits: usize,
         num_global_qubits: usize,
@@ -23,6 +21,10 @@ pub trait BlockingSimulator<S: QuantumExecution, G> {
         global_qubit: usize,
         local_qubit: usize,
     );
+
+    fn print_global_state(_global_data: &G, _simulators: &[S]) {
+        unimplemented!()
+    }
 }
 
 enum Gate {
@@ -36,17 +38,17 @@ enum Gate {
     RZ(f64),
 }
 
-pub struct Blocking<G, S: QuantumExecution + BlockingSimulator<S, G>> {
+pub struct Block<G, S: QuantumExecution + BlockSimulator<S, G>> {
     num_global_qubits: usize,
     num_local_qubits: usize,
     simulators: Vec<S>,
     global_data: G,
-    logical_qubit_map: Vec<usize>,
+    logical_to_physical: BiMap<usize, usize>,
     next_local_qubit: usize,
     gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
 }
 
-impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
+impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
     const fn get_next_local_qubit(&mut self) -> usize {
         let qubit = self.next_local_qubit;
         self.next_local_qubit = (qubit + 1) % self.num_local_qubits;
@@ -57,13 +59,16 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
         qubit < self.num_local_qubits
     }
 
-    fn get_local_qubit(&mut self, qubit: usize) -> usize {
-        let mapped_qubit = self.logical_qubit_map[qubit];
-        if self.is_local(mapped_qubit) {
-            mapped_qubit
+    fn get_local_qubit(&mut self, logical_qubit: usize) -> usize {
+        let physical_qubit = *self
+            .logical_to_physical
+            .get_by_left(&logical_qubit)
+            .unwrap();
+        if self.is_local(physical_qubit) {
+            physical_qubit
         } else {
             self.execute_gates();
-            let global_qubit = mapped_qubit - self.num_local_qubits;
+            let global_qubit = physical_qubit - self.num_local_qubits;
             let local_qubit = self.get_next_local_qubit();
 
             S::swap(
@@ -75,12 +80,19 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
                 local_qubit,
             );
 
-            let local_qubit_index = self
-                .logical_qubit_map
-                .iter()
-                .position(|val| *val == local_qubit)
-                .unwrap();
-            self.logical_qubit_map.swap(qubit, local_qubit_index);
+            let old_logical_qubit = *self.logical_to_physical.get_by_right(&local_qubit).unwrap();
+
+            self.logical_to_physical.insert(logical_qubit, local_qubit);
+            self.logical_to_physical
+                .insert(old_logical_qubit, physical_qubit);
+
+            #[cfg(debug_assertions)]
+            {
+                println!(
+                    "\x1b[1;95mlogical <> physical {:?}\x1b[0m",
+                    self.logical_to_physical
+                );
+            }
 
             local_qubit
         }
@@ -90,7 +102,7 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
         let mut new_control = Vec::new();
         let mut execute = vec![true; self.simulators.len()];
         for c in control {
-            let c = self.logical_qubit_map[*c];
+            let c = *self.logical_to_physical.get_by_left(c).unwrap();
             if self.is_local(c) {
                 new_control.push(c);
             } else {
@@ -136,7 +148,7 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> Blocking<G, S> {
     }
 }
 
-impl<G, S: QuantumExecution + BlockingSimulator<S, G>> QuantumExecution for Blocking<G, S> {
+impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G, S> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
         Self: Sized,
@@ -163,14 +175,14 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> QuantumExecution for Bloc
 
         let (simulators, global_data) = S::new_blocks(num_local_qubits, num_global_qubits)?;
 
-        let logical_qubit_map: Vec<_> = (0..num_qubits).collect();
+        let logical_to_physical = (0..num_qubits).map(|i| (i, i)).collect();
 
         Ok(Self {
             num_global_qubits,
             num_local_qubits,
             simulators,
             global_data,
-            logical_qubit_map,
+            logical_to_physical,
             next_local_qubit: 0,
             gate_queue: Vec::new(),
         })
@@ -244,50 +256,39 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> QuantumExecution for Bloc
         }
     }
 
-    fn dump(&mut self, qubits: &[usize]) -> ket::process::DumpData {
+    fn dump(&mut self, logical_qubits: &[usize]) -> ket::process::DumpData {
         self.execute_gates();
-        let mut local_qubits = Vec::new();
-        let mut local_qubits_index = Vec::new();
-        let mut global_qubits = Vec::new();
-        let mut global_qubits_index = Vec::new();
 
-        for (i, q) in qubits.iter().enumerate() {
-            let q = self.logical_qubit_map[*q];
-            if self.is_local(q) {
-                local_qubits.push(q);
-                local_qubits_index.push(i);
-            } else {
-                global_qubits.push(q - self.num_local_qubits);
-                global_qubits_index.push(i);
-            }
-        }
+        let physical_qubits: Vec<_> = logical_qubits
+            .iter()
+            .map(|q| *self.logical_to_physical.get_by_left(q).unwrap())
+            .collect();
 
         let mut global_dump = DumpData::default();
 
-        for (global, s) in self.simulators.iter_mut().enumerate() {
-            let dump = s.dump(&local_qubits);
-
-            let global_state = global_qubits_index
-                .iter()
-                .zip(global_qubits.iter())
-                .map(|(at, index)| bit_at(global, *index, *at))
-                .reduce(|a, b| a | b)
-                .unwrap_or(0) as u64;
-
-            for (s, (r, i)) in dump
-                .basis_states
-                .iter()
-                .zip(dump.amplitudes_real.iter().zip(dump.amplitudes_imag.iter()))
-            {
-                let new_state = local_qubits_index
+        for (global_index, simulator) in self.simulators.iter_mut().enumerate() {
+            let local_dump = simulator.dump(&physical_qubits);
+            for (s, (r, i)) in local_dump.basis_states.iter().zip(
+                local_dump
+                    .amplitudes_real
                     .iter()
-                    .zip(local_qubits.iter())
-                    .map(|(at, index)| bit_at(s[0] as usize, *index, *at))
+                    .zip(local_dump.amplitudes_imag.iter()),
+            ) {
+                let global_state = physical_qubits
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .filter(|(_, q)| **q >= self.num_local_qubits)
+                    .map(|(index, qubit)| (index, *qubit - self.num_local_qubits))
+                    .map(|(index, qubit)| {
+                        let bit = (global_index >> qubit) & 1;
+                        bit << index
+                    })
                     .reduce(|a, b| a | b)
-                    .unwrap_or(0) as u64
-                    | global_state;
+                    .unwrap_or(0);
 
-                global_dump.basis_states.push(vec![new_state]);
+                let state = s[0] as usize | global_state;
+                global_dump.basis_states.push(vec![state as u64]);
                 global_dump.amplitudes_real.push(*r);
                 global_dump.amplitudes_imag.push(*i);
             }
@@ -331,8 +332,8 @@ impl<G, S: QuantumExecution + BlockingSimulator<S, G>> QuantumExecution for Bloc
     }
 }
 
-impl<G, S: QuantumExecution + BlockingSimulator<S, G> + ExecutionFeatures> ExecutionFeatures
-    for Blocking<G, S>
+impl<G, S: QuantumExecution + BlockSimulator<S, G> + ExecutionFeatures> ExecutionFeatures
+    for Block<G, S>
 {
     fn feature_measure() -> ket::execution::Capability {
         S::feature_measure()
