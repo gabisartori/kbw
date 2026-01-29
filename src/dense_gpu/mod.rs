@@ -565,10 +565,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display>
         }
 
         *state_real = Rc::clone(&new_state_real);
-        *state_imag = Rc::clone(&state_imag);
-        for i in 0..(1 << num_global_qubits) {
-            simulators[i].state_real = Rc::clone(&new_state_real);
-            simulators[i].state_imag = Rc::clone(&new_state_imag);
+        *state_imag = Rc::clone(state_imag);
+        for simulator in simulators {
+            simulator.state_real = Rc::clone(&new_state_real);
+            simulator.state_imag = Rc::clone(&new_state_imag);
         }
     }
 
@@ -589,7 +589,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display>
 
         println!("==============");
         for (state, (re, im)) in state_real.iter().zip(state_imag).enumerate() {
-            println!("{state:0width$b}: ({:.4} {:+.4})", re, im, width = n);
+            println!("{state:0n$b}: ({re:.4} {im:+.4})");
         }
         println!("==============");
     }
