@@ -31,6 +31,35 @@ pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps> {
     _f: PhantomData<F>,
 }
 
+fn launch_all<F>(num_qubits: usize, state_size: usize, kernel: F)
+where
+    F: Fn(u32, u32, u32),
+{
+    let (cube_count, cube_dim) = if num_qubits <= 10 {
+        (1, state_size)
+    } else {
+        (1 << (num_qubits - 10), 1024)
+    };
+
+    let limit = 15;
+
+    let (cube_count_2, cube_count_per_launch) = if cube_count <= (1 << limit) {
+        (1, cube_count)
+    } else {
+        (cube_count >> limit, 1 << limit)
+    };
+
+    let threads_per_launch = (cube_count_per_launch * cube_dim) as u32;
+
+    for i in 0..cube_count_2 {
+        kernel(
+            cube_count_per_launch as u32,
+            cube_dim as u32,
+            i as u32 * threads_per_launch,
+        );
+    }
+}
+
 impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
@@ -40,10 +69,25 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
         let client = R::client(&device);
 
         let state_size = 1usize << num_qubits;
-        let mut state = vec![F::zero(); state_size];
-        let state_imag = Rc::new(RefCell::new(client.create_from_slice(F::as_bytes(&state))));
-        state[0] = F::one();
-        let state_real = Rc::new(RefCell::new(client.create_from_slice(F::as_bytes(&state))));
+        let state_size_bytes = state_size * std::mem::size_of::<F>();
+        let state_imag = Rc::new(RefCell::new(client.empty(state_size_bytes)));
+        let state_real = Rc::new(RefCell::new(client.empty(state_size_bytes)));
+
+        launch_all(
+            num_qubits,
+            state_size,
+            |cube_count, cube_dim, offset| unsafe {
+                kernel::init_state::launch_unchecked::<F, R>(
+                    &client,
+                    CubeCount::new_1d(cube_count),
+                    CubeDim::new_1d(cube_dim),
+                    ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
+                    ScalarArg::new(offset),
+                )
+                .unwrap()
+            },
+        );
 
         Ok(Self {
             state_real,
@@ -57,163 +101,331 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_x::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (stride_x, stride_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_x::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(x * stride_x),
+                        ScalarArg::new(y * stride_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_y::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_y::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_z::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_z::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn hadamard(&mut self, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_h::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-                ScalarArg::new(F::FRAC_1_SQRT_2()),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_h::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(F::FRAC_1_SQRT_2()),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_p::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-                ScalarArg::new(F::from(lambda.cos()).unwrap()),
-                ScalarArg::new(F::from(lambda.sin()).unwrap()),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_p::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(F::from(lambda.cos()).unwrap()),
+                        ScalarArg::new(F::from(lambda.sin()).unwrap()),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_rx::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                ScalarArg::new(F::from(-(theta / 2.0).sin()).unwrap()),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_rx::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                        ScalarArg::new(F::from(-(theta / 2.0).sin()).unwrap()),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_ry::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_ry::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                        ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (half_block_size, full_block_size, cube_count, cube_dim) =
-            kernel::compute_cube_size(self.num_qubits, target);
-        unsafe {
-            kernel::gate_rz::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                cube_count,
-                cube_dim,
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(get_ctrl_mask(control)),
-                ScalarArg::new(half_block_size),
-                ScalarArg::new(full_block_size),
-                ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-            )
-            .unwrap();
+        let (
+            half_block_size,
+            full_block_size,
+            (cube_count_2_x, cube_count_2_y),
+            (cube_size_x, cube_size_y),
+            cube_count,
+            cube_dim,
+        ) = kernel::compute_cube_size(self.num_qubits, target);
+
+        for x in 0..cube_count_2_x {
+            for y in 0..cube_count_2_y {
+                unsafe {
+                    kernel::gate_rz::launch_unchecked::<F, R>(
+                        &self.client.borrow(),
+                        cube_count.clone(),
+                        cube_dim,
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_real.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ArrayArg::from_raw_parts::<F>(
+                            &self.state_imag.borrow_mut(),
+                            self.state_size,
+                            1,
+                        ),
+                        ScalarArg::new(self.offset),
+                        ScalarArg::new(get_ctrl_mask(control)),
+                        ScalarArg::new(half_block_size),
+                        ScalarArg::new(full_block_size),
+                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
+                        ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
+                        ScalarArg::new(x * cube_size_x),
+                        ScalarArg::new(y * cube_size_y),
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
@@ -224,28 +436,26 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
             .borrow()
             .empty(prob_size * core::mem::size_of::<F>());
 
-        let (cube_count, cube_dim) = if self.num_qubits <= 11 {
-            (1, prob_size)
-        } else {
-            (1 << (self.num_qubits - 11), 1024)
-        };
-
         let mask = (1 << target) - 1;
 
-        unsafe {
-            kernel::measure_p1::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                CubeCount::new_1d(cube_count as u32),
-                CubeDim::new_1d(cube_dim as u32),
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ArrayArg::from_raw_parts::<F>(&prob, prob_size, 1),
-                ScalarArg::new(target as u32),
-                ScalarArg::new(mask),
-            )
-            .unwrap();
-        }
+        launch_all(
+            self.num_qubits - 1,
+            self.state_size >> 1,
+            |cube_count, cube_dim, offset| unsafe {
+                kernel::measure_p1::launch_unchecked::<F, R>(
+                    &self.client.borrow(),
+                    CubeCount::new_1d(cube_count),
+                    CubeDim::new_1d(cube_dim),
+                    ArrayArg::from_raw_parts::<F>(&self.state_real.borrow(), self.state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), self.state_size, 1),
+                    ScalarArg::new(self.offset + offset as usize),
+                    ArrayArg::from_raw_parts::<F>(&prob, prob_size, 1),
+                    ScalarArg::new(target as u32),
+                    ScalarArg::new(mask),
+                )
+                .unwrap();
+            },
+        );
 
         let prob = self.client.borrow().read_one(prob);
         let prob = F::from_bytes(&prob);
@@ -254,28 +464,34 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
-        let (cube_count, cube_dim) = if self.num_qubits <= 10 {
-            (1, self.state_size)
-        } else {
-            (1 << (self.num_qubits - 10), 1024)
-        };
-
         let mask = 1 << target;
 
-        unsafe {
-            kernel::measure_collapse::launch_unchecked::<F, R>(
-                &self.client.borrow(),
-                CubeCount::new_1d(cube_count as u32),
-                CubeDim::new_1d(cube_dim as u32),
-                ArrayArg::from_raw_parts::<F>(&self.state_real.borrow_mut(), self.state_size, 1),
-                ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow_mut(), self.state_size, 1),
-                ScalarArg::new(self.offset),
-                ScalarArg::new(mask),
-                ScalarArg::new(if result { mask } else { 0 }),
-                ScalarArg::new(F::from(p).unwrap()),
-            )
-            .unwrap();
-        }
+        launch_all(
+            self.num_qubits,
+            self.state_size,
+            |cube_count, cube_dim, offset| unsafe {
+                kernel::measure_collapse::launch_unchecked::<F, R>(
+                    &self.client.borrow(),
+                    CubeCount::new_1d(cube_count),
+                    CubeDim::new_1d(cube_dim),
+                    ArrayArg::from_raw_parts::<F>(
+                        &self.state_real.borrow_mut(),
+                        self.state_size,
+                        1,
+                    ),
+                    ArrayArg::from_raw_parts::<F>(
+                        &self.state_imag.borrow_mut(),
+                        self.state_size,
+                        1,
+                    ),
+                    ScalarArg::new(self.offset + offset as usize),
+                    ScalarArg::new(mask),
+                    ScalarArg::new(if result { mask } else { 0 }),
+                    ScalarArg::new(F::from(p).unwrap()),
+                )
+                .unwrap();
+            },
+        );
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
@@ -399,14 +615,21 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
 
     fn clear(&mut self) {
         let state_size = 1usize << self.num_qubits;
-        let mut state = vec![F::zero(); state_size];
-        self.state_imag = Rc::new(RefCell::new(
-            self.client.borrow().create_from_slice(F::as_bytes(&state)),
-        ));
-        state[0] = F::one();
-        self.state_real = Rc::new(RefCell::new(
-            self.client.borrow().create_from_slice(F::as_bytes(&state)),
-        ));
+        launch_all(
+            self.num_qubits,
+            state_size,
+            |cube_count, cube_dim, offset| unsafe {
+                kernel::init_state::launch_unchecked::<F, R>(
+                    &self.client.borrow(),
+                    CubeCount::new_1d(cube_count),
+                    CubeDim::new_1d(cube_dim),
+                    ArrayArg::from_raw_parts::<F>(&self.state_real.borrow(), state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), state_size, 1),
+                    ScalarArg::new(offset),
+                )
+                .unwrap()
+            },
+        );
     }
 
     fn save(&self) -> Vec<u8> {
@@ -475,14 +698,25 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display>
         let client = Rc::new(RefCell::new(R::client(&device)));
 
         let state_size = 1usize << num_qubits;
-        let mut state = vec![F::zero(); state_size];
-        let state_imag = Rc::new(RefCell::new(
-            client.borrow().create_from_slice(F::as_bytes(&state)),
-        ));
-        state[0] = F::one();
-        let state_real = Rc::new(RefCell::new(
-            client.borrow().create_from_slice(F::as_bytes(&state)),
-        ));
+        let state_size_bytes = state_size * std::mem::size_of::<F>();
+        let state_imag = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
+        let state_real = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
+
+        launch_all(
+            num_qubits,
+            state_size,
+            |cube_count, cube_dim, offset| unsafe {
+                kernel::init_state::launch_unchecked::<F, R>(
+                    &client.borrow(),
+                    CubeCount::new_1d(cube_count),
+                    CubeDim::new_1d(cube_dim),
+                    ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
+                    ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
+                    ScalarArg::new(offset),
+                )
+                .unwrap()
+            },
+        );
 
         let mut simulators = Vec::new();
 
@@ -534,35 +768,25 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display>
                 .empty(state_size * core::mem::size_of::<F>()),
         ));
 
-        let (cube_count, cube_dim) = if num_qubits <= 10 {
-            (1, state_size)
-        } else {
-            (1 << (num_qubits - 10), 1024)
-        };
-
-        let (cube_count_2, cube_count) = if cube_count <= (1 << 24) {
-            (1, cube_count)
-        } else {
-            (cube_count >> 24, 1 << 24)
-        };
-
-        for i in 0..cube_count_2 {
-            unsafe {
+        launch_all(
+            num_qubits,
+            state_size,
+            |cube_count, cube_dim, offset| unsafe {
                 kernel::copy_swap::launch_unchecked::<F, R>(
                     &client.borrow(),
                     CubeCount::new_1d(cube_count),
-                    CubeDim::new_1d(cube_dim as u32),
+                    CubeDim::new_1d(cube_dim),
                     ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
                     ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
                     ArrayArg::from_raw_parts::<F>(&new_state_real.borrow_mut(), state_size, 1),
                     ArrayArg::from_raw_parts::<F>(&new_state_imag.borrow_mut(), state_size, 1),
-                    ScalarArg::new(i * cube_count),
+                    ScalarArg::new(offset),
                     ScalarArg::new((global_qubit + num_local_qubits) as u32),
                     ScalarArg::new(local_qubit as u32),
                 )
                 .unwrap();
-            }
-        }
+            },
+        );
 
         *state_real = Rc::clone(&new_state_real);
         *state_imag = Rc::clone(state_imag);

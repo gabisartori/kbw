@@ -317,10 +317,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
     }
 
     fn clear(&mut self) {
-        self.gate_queue.clear();
-        for s in &mut self.simulators {
-            s.clear();
-        }
+        *self = Self::new(self.num_global_qubits + self.num_local_qubits).unwrap();
     }
 
     fn save(&self) -> Vec<u8> {
