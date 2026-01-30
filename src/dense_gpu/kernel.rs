@@ -405,17 +405,21 @@ pub(super) fn gate_rz<F: Float + LaunchArg>(
 pub(super) fn measure_p1<F: Float>(
     state_real: &Array<F>,
     state_imag: &Array<F>,
-    offset: usize,
+    iter_offset: usize,
+    block_offset: usize,
     prob: &mut Array<F>,
     target: u32,
     mask: u32,
 ) {
-    let state = ABSOLUTE_POS_X + offset as u32;
-    let state = ((((state >> target) << 1) | 1) << target) | (state & mask);
-    let state = state as usize;
+    let compressed_idx = ABSOLUTE_POS_X + iter_offset as u32;
 
-    prob[ABSOLUTE_POS_X as usize + offset] =
-        state_real[state] * state_real[state] + state_imag[state] * state_imag[state]
+    let expanded_local_idx =
+        ((((compressed_idx >> target) << 1) | 1) << target) | (compressed_idx & mask);
+
+    let read_idx = block_offset + expanded_local_idx as usize;
+
+    prob[compressed_idx as usize] =
+        state_real[read_idx] * state_real[read_idx] + state_imag[read_idx] * state_imag[read_idx]
 }
 
 #[cube(launch_unchecked)]
