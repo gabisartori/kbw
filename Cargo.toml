@@ -45,3 +45,6 @@ crate-type = ["cdylib", "rlib"]
 
 [profile.release]
 strip = true
+
+[features]
+swap_count = []
