@@ -4,6 +4,8 @@
 
 use cubecl::prelude::*;
 
+use crate::dense_gpu::ConstantFloat;
+
 pub(super) fn compute_cube_size(
     num_qubits: usize,
     target: usize,
@@ -129,8 +131,11 @@ pub(super) fn gate_y<F: Float>(
         let old0_real = state_real[ket.0];
         let old0_imag = state_imag[ket.0];
 
-        state_real[ket.0] = state_imag[ket.1];
-        state_imag[ket.0] = -state_real[ket.1];
+        let old1_real = state_real[ket.1];
+        let old1_imag = state_imag[ket.1];
+
+        state_real[ket.0] = old1_imag;
+        state_imag[ket.0] = -old1_real;
 
         state_real[ket.1] = -old0_imag;
         state_imag[ket.1] = old0_real;
@@ -164,14 +169,13 @@ pub(super) fn gate_z<F: Float>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_h<F: Float + LaunchArg>(
+pub(super) fn gate_h<F: Float + LaunchArg + ConstantFloat>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     offset: usize,
     control_mask: u32,
     half_block_size: u32,
     full_block_size: u32,
-    frac_1_sqrt_2: F,
     count_offset_x: u32,
     count_offset_y: u32,
 ) {
@@ -185,31 +189,33 @@ pub(super) fn gate_h<F: Float + LaunchArg>(
     );
 
     if ket.2 {
-        let old0_real = state_real[ket.0];
-        let old0_imag = state_imag[ket.0];
+        let r0 = state_real[ket.0];
+        let i0 = state_imag[ket.0];
 
-        let old1_real = state_real[ket.1];
-        let old1_imag = state_imag[ket.1];
+        let r1 = state_real[ket.1];
+        let i1 = state_imag[ket.1];
 
-        state_real[ket.0] = (old0_real + old1_real) * frac_1_sqrt_2;
-        state_imag[ket.0] = (old0_imag + old1_imag) * frac_1_sqrt_2;
+        let k = F::FRAC_1_SQRT_2;
 
-        state_real[ket.1] = (old0_real - old1_real) * frac_1_sqrt_2;
-        state_imag[ket.1] = (old0_imag - old1_imag) * frac_1_sqrt_2;
+        let sum_r = r0 + r1;
+        let diff_r = r0 - r1;
+
+        let sum_i = i0 + i1;
+        let diff_i = i0 - i1;
+
+        state_real[ket.0] = sum_r * k;
+        state_imag[ket.0] = sum_i * k;
+
+        state_real[ket.1] = diff_r * k;
+        state_imag[ket.1] = diff_i * k;
     }
 }
 
 #[cube]
-pub(super) fn complex_mul<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
-    (
-        lhs_real * rhs_real - lhs_imag * rhs_imag,
-        lhs_real * rhs_imag + lhs_imag * rhs_real,
-    )
-}
-
-#[cube]
-pub(super) fn complex_add<F: Float>(lhs_real: F, lhs_imag: F, rhs_real: F, rhs_imag: F) -> (F, F) {
-    (lhs_real + rhs_real, lhs_imag + rhs_imag)
+fn complex_mul<F: Float>(a_r: F, a_i: F, b_r: F, b_i: F) -> (F, F) {
+    let real = fma(a_r, b_r, -(a_i * b_i));
+    let imag = fma(a_r, b_i, a_i * b_r);
+    (real, imag)
 }
 
 #[cube(launch_unchecked)]
@@ -242,7 +248,7 @@ pub(super) fn gate_p<F: Float + LaunchArg>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_rx<F: Float + LaunchArg>(
+pub(super) fn gate_rx<F: Float + LaunchArg + ConstantFloat>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     offset: usize,
@@ -264,46 +270,21 @@ pub(super) fn gate_rx<F: Float + LaunchArg>(
     );
 
     if ket.2 {
-        let (ket0_cos_real, ket0_cos_imag) = complex_mul::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
+        let ket0_re = state_real[ket.0];
+        let ket1_re = state_real[ket.1];
+        let ket0_im = state_imag[ket.0];
+        let ket1_im = state_imag[ket.1];
 
-        let (ket1_sin_real, ket1_sin_imag) = complex_mul::<F>(
-            F::new(0.0),
-            sin_theta_2,
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
+        state_real[ket.0] = fma(ket0_re, cos_theta_2, -ket1_im * sin_theta_2);
+        state_imag[ket.0] = fma(ket0_im, cos_theta_2, ket1_re * sin_theta_2);
 
-        let (ket0_sin_real, ket0_sin_imag) = complex_mul::<F>(
-            F::new(0.0),
-            sin_theta_2,
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_cos_real, ket1_cos_imag) = complex_mul::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (r, i) = complex_add::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
-        state_real[ket.0] = r;
-        state_imag[ket.0] = i;
-
-        let (r, i) = complex_add::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
+        state_real[ket.1] = fma(ket1_re, cos_theta_2, -ket0_im * sin_theta_2);
+        state_imag[ket.1] = fma(ket1_im, cos_theta_2, ket0_re * sin_theta_2);
     }
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn gate_ry<F: Float + LaunchArg>(
+pub(super) fn gate_ry<F: Float + LaunchArg + ConstantFloat>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     offset: usize,
@@ -325,41 +306,16 @@ pub(super) fn gate_ry<F: Float + LaunchArg>(
     );
 
     if ket.2 {
-        let (ket0_cos_real, ket0_cos_imag) = complex_mul::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
+        let ket0_re = state_real[ket.0];
+        let ket1_re = state_real[ket.1];
+        let ket0_im = state_imag[ket.0];
+        let ket1_im = state_imag[ket.1];
 
-        let (ket1_sin_real, ket1_sin_imag) = complex_mul::<F>(
-            -sin_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
+        state_real[ket.0] = fma(ket0_re, cos_theta_2, ket1_re * -sin_theta_2);
+        state_imag[ket.0] = fma(ket0_im, cos_theta_2, ket1_im * -sin_theta_2);
 
-        let (ket0_sin_real, ket0_sin_imag) = complex_mul::<F>(
-            sin_theta_2,
-            F::new(0.0),
-            state_real[ket.0],
-            state_imag[ket.0],
-        );
-
-        let (ket1_cos_real, ket1_cos_imag) = complex_mul::<F>(
-            cos_theta_2,
-            F::new(0.0),
-            state_real[ket.1],
-            state_imag[ket.1],
-        );
-
-        let (r, i) = complex_add::<F>(ket0_cos_real, ket0_cos_imag, ket1_sin_real, ket1_sin_imag);
-        state_real[ket.0] = r;
-        state_imag[ket.0] = i;
-
-        let (r, i) = complex_add::<F>(ket0_sin_real, ket0_sin_imag, ket1_cos_real, ket1_cos_imag);
-        state_real[ket.1] = r;
-        state_imag[ket.1] = i;
+        state_real[ket.1] = fma(ket1_re, cos_theta_2, ket0_re * sin_theta_2);
+        state_imag[ket.1] = fma(ket1_im, cos_theta_2, ket0_im * sin_theta_2);
     }
 }
 
@@ -386,16 +342,16 @@ pub(super) fn gate_rz<F: Float + LaunchArg>(
     );
 
     if ket.2 {
-        let (r, i) = complex_mul::<F>(
-            state_real[ket.0],
-            state_imag[ket.0],
-            angle_real,
-            -angle_imag,
-        );
+        let ket0_re = state_real[ket.0];
+        let ket1_re = state_real[ket.1];
+        let ket0_im = state_imag[ket.0];
+        let ket1_im = state_imag[ket.1];
+
+        let (r, i) = complex_mul::<F>(ket0_re, ket0_im, angle_real, -angle_imag);
         state_real[ket.0] = r;
         state_imag[ket.0] = i;
 
-        let (r, i) = complex_mul::<F>(state_real[ket.1], state_imag[ket.1], angle_real, angle_imag);
+        let (r, i) = complex_mul::<F>(ket1_re, ket1_im, angle_real, angle_imag);
         state_real[ket.1] = r;
         state_imag[ket.1] = i;
     }
@@ -417,13 +373,15 @@ pub(super) fn measure_p1<F: Float>(
         ((((compressed_idx >> target) << 1) | 1) << target) | (compressed_idx & mask);
 
     let read_idx = block_offset + expanded_local_idx as usize;
+    let re = state_real[read_idx];
+    let im = state_imag[read_idx];
 
-    prob[compressed_idx as usize] =
-        state_real[read_idx] * state_real[read_idx] + state_imag[read_idx] * state_imag[read_idx]
+    prob[compressed_idx as usize] = re * re + im * im;
 }
 
+#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
-pub(super) fn measure_collapse<F: Float + LaunchArg>(
+pub(super) fn measure_collapse<F: Float + LaunchArg + ConstantFloat>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     offset: usize,
@@ -433,15 +391,16 @@ pub(super) fn measure_collapse<F: Float + LaunchArg>(
 ) {
     let state = ABSOLUTE_POS_X + offset as u32;
     let state_index = state as usize;
+
     state_real[state_index] = if (state & target_mask) == result {
         state_real[state_index] * p
     } else {
-        F::new(0.0)
+        F::ZERO.into()
     };
     state_imag[state_index] = if (state & target_mask) == result {
         state_imag[state_index] * p
     } else {
-        F::new(0.0)
+        F::ZERO.into()
     };
 }
 
@@ -456,8 +415,9 @@ pub(super) const fn parity_u32(x: u32) -> u32 {
     v & 1
 }
 
+#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
-pub(super) fn exp_value<F: Float>(
+pub(super) fn exp_value<F: Float + ConstantFloat>(
     state_real: &Array<F>,
     state_imag: &Array<F>,
     offset: usize,
@@ -466,12 +426,15 @@ pub(super) fn exp_value<F: Float>(
 ) {
     let state = ABSOLUTE_POS_X + offset as u32;
     let state_index = state as usize;
-    prob[state_index] = if parity_u32(state & target_mask) == 1 {
-        F::new(-1.0)
+    let sign: F = if parity_u32(state & target_mask) == 1 {
+        F::MINUS_ONE.into()
     } else {
-        F::new(1.0)
-    } * (state_real[state_index] * state_real[state_index]
-        + state_imag[state_index] * state_imag[state_index]);
+        F::ONE.into()
+    };
+
+    prob[state_index] = sign
+        * (state_real[state_index] * state_real[state_index]
+            + state_imag[state_index] * state_imag[state_index]);
 }
 
 #[cube(launch_unchecked)]
@@ -495,13 +458,18 @@ pub(super) fn copy_swap<F: Float>(
     new_state_imag[state as usize] = old_state_imag[src_state as usize];
 }
 
+#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
-pub(super) fn init_state<F: Float>(
+pub(super) fn init_state<F: Float + ConstantFloat>(
     state_real: &mut Array<F>,
     state_imag: &mut Array<F>,
     offset: u32,
 ) {
     let state = (offset + ABSOLUTE_POS_X) as usize;
-    state_real[state] = if state == 0 { F::new(1.0) } else { F::new(0.0) };
-    state_imag[state] = F::new(0.0);
+    state_real[state] = if state == 0 {
+        F::ONE.into()
+    } else {
+        F::ZERO.into()
+    };
+    state_imag[state] = F::ZERO;
 }

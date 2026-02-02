@@ -20,7 +20,22 @@ use ket::{
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{cell::RefCell, fmt::Display, marker::PhantomData, rc::Rc};
 
-pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps> {
+#[cube]
+pub trait ConstantFloat {
+    const ZERO: Self;
+    const ONE: Self;
+    const MINUS_ONE: Self;
+    const FRAC_1_SQRT_2: Self;
+}
+
+#[cube]
+impl ConstantFloat for f32 {
+    const ZERO: Self = 0.0f32;
+    const ONE: Self = 1.0f32;
+    const MINUS_ONE: Self = -1.0f32;
+    const FRAC_1_SQRT_2: Self = std::f32::consts::FRAC_1_SQRT_2;
+}
+pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> {
     state_real: Rc<RefCell<cubecl::server::Handle>>,
     state_imag: Rc<RefCell<cubecl::server::Handle>>,
     offset: usize,
@@ -60,7 +75,9 @@ where
     }
 }
 
-impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGPU<R, F> {
+impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecution
+    for DenseGPU<R, F>
+{
     fn new(num_qubits: usize) -> crate::error::Result<Self>
     where
         Self: Sized,
@@ -251,7 +268,6 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
                         ScalarArg::new(get_ctrl_mask(control)),
                         ScalarArg::new(half_block_size),
                         ScalarArg::new(full_block_size),
-                        ScalarArg::new(F::FRAC_1_SQRT_2()),
                         ScalarArg::new(x * cube_size_x),
                         ScalarArg::new(y * cube_size_y),
                     )
@@ -642,7 +658,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> QuantumExecution for DenseGP
     }
 }
 
-impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseGPU<R, F> {
+impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> ExecutionFeatures
+    for DenseGPU<R, F>
+{
     fn feature_measure() -> Capability {
         Capability::Advanced
     }
@@ -672,7 +690,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps> ExecutionFeatures for DenseG
     }
 }
 
-impl<R: Runtime, F: Float + CubeElement + FloatOps + Display>
+impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
     BlockSimulator<
         Self,
         (
