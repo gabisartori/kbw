@@ -44,15 +44,26 @@ pub struct Block<G, S: QuantumExecution + BlockSimulator<S, G>> {
     simulators: Vec<S>,
     global_data: G,
     logical_to_physical: BiMap<usize, usize>,
-    next_local_qubit: usize,
+    qubit_last_access: Vec<u64>,
+    access_counter: u64,
     gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
 }
 
 impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
-    const fn get_next_local_qubit(&mut self) -> usize {
-        let qubit = self.next_local_qubit;
-        self.next_local_qubit = (qubit + 1) % self.num_local_qubits;
-        qubit
+    fn touch(&mut self, physical_qubit: usize) {
+        if physical_qubit < self.num_local_qubits {
+            self.access_counter += 1;
+            self.qubit_last_access[physical_qubit] = self.access_counter;
+        }
+    }
+
+    fn get_next_local_qubit(&self) -> usize {
+        self.qubit_last_access
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, &timestamp)| timestamp)
+            .map(|(index, _)| index)
+            .unwrap_or(0) // Fallback for 0 qubits, though usually checked in new()
     }
 
     const fn is_local(&self, qubit: usize) -> bool {
@@ -64,7 +75,9 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
             .logical_to_physical
             .get_by_left(&logical_qubit)
             .unwrap();
+
         if self.is_local(physical_qubit) {
+            self.touch(physical_qubit);
             physical_qubit
         } else {
             self.execute_gates();
@@ -93,6 +106,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
                     self.logical_to_physical
                 );
             }
+            self.touch(local_qubit);
 
             local_qubit
         }
@@ -176,6 +190,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
         let (simulators, global_data) = S::new_blocks(num_local_qubits, num_global_qubits)?;
 
         let logical_to_physical = (0..num_qubits).map(|i| (i, i)).collect();
+        let qubit_last_access = vec![0; num_local_qubits];
 
         Ok(Self {
             num_global_qubits,
@@ -183,7 +198,8 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
             simulators,
             global_data,
             logical_to_physical,
-            next_local_qubit: 0,
+            qubit_last_access,
+            access_counter: 0,
             gate_queue: Vec::new(),
         })
     }
