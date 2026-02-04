@@ -97,9 +97,6 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
             #[cfg(feature = "swap_count")]
             {
                 self.swap_count += 1;
-                unsafe {
-                    std::env::set_var("KBW_BLOCK_SWAP_COUNT", format!("{}", self.swap_count));
-                }
             }
 
             let old_logical_qubit = *self.logical_to_physical.get_by_right(&local_qubit).unwrap();
@@ -167,6 +164,15 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(feature = "swap_count")]
+impl<G, S: QuantumExecution + BlockSimulator<S, G>> Drop for Block<G, S> {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::set_var("KBW_BLOCK_SWAP_COUNT", format!("{}", self.swap_count));
         }
     }
 }

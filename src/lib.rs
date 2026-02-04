@@ -58,6 +58,7 @@ pub type DenseGPUSimulator = quantum_execution::QubitManager<DenseGPU>;
 pub type DenseGPUBlock = block::Block<
     (
         std::rc::Rc<std::cell::RefCell<cubecl::client::ComputeClient<cubecl::wgpu::WgpuRuntime>>>,
+        std::rc::Rc<std::cell::RefCell<usize>>,
         std::rc::Rc<std::cell::RefCell<cubecl::server::Handle>>,
         std::rc::Rc<std::cell::RefCell<cubecl::server::Handle>>,
     ),

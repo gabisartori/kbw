@@ -43,6 +43,7 @@ pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloa
     num_qubits: usize,
 
     client: Rc<RefCell<ComputeClient<R>>>,
+    op_count: Rc<RefCell<usize>>,
     _f: PhantomData<F>,
 }
 
@@ -75,6 +76,19 @@ where
     }
 }
 
+impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> DenseGPU<R, F> {
+    fn sync(&mut self) {
+        let mut op_count = self.op_count.borrow_mut();
+        if *op_count * self.state_size > 10 << 27 {
+            let client = self.client.borrow();
+            let fut = async { client.sync().await };
+            pollster::block_on(fut).unwrap();
+            *op_count = 0;
+        } else {
+            *op_count += 1;
+        }
+    }
+}
 impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecution
     for DenseGPU<R, F>
 {
@@ -109,6 +123,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
         Ok(Self {
             state_real,
             state_imag,
+            op_count: Rc::new(RefCell::new(0)),
             offset: 0,
             state_size,
             num_qubits,
@@ -126,6 +141,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -166,6 +182,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -206,6 +223,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -246,6 +264,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -286,6 +305,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -328,6 +348,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -370,6 +391,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -412,6 +434,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             cube_count,
             cube_dim,
         ) = kernel::compute_cube_size(self.num_qubits, target);
+        self.sync();
 
         for x in 0..cube_count_2_x {
             for y in 0..cube_count_2_y {
@@ -476,6 +499,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
 
         let prob = self.client.borrow().read_one(prob);
         let prob = F::from_bytes(&prob);
+
+        *self.op_count.borrow_mut() = 0;
 
         prob.par_iter().copied().sum::<F>().to_f64().unwrap()
     }
@@ -695,6 +720,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         Self,
         (
             Rc<RefCell<ComputeClient<R>>>,
+            Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
         ),
@@ -707,6 +733,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         Vec<Self>,
         (
             Rc<RefCell<ComputeClient<R>>>,
+            Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
         ),
@@ -720,6 +747,8 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         let state_size_bytes = state_size * std::mem::size_of::<F>();
         let state_imag = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
         let state_real = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
+
+        let op_count = Rc::new(RefCell::new(0));
 
         launch_all(
             num_qubits,
@@ -748,16 +777,18 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                 state_size: sub_state_size,
                 num_qubits: num_local_qubits,
                 client: Rc::clone(&client),
+                op_count: Rc::clone(&op_count),
                 _f: PhantomData,
             });
         }
 
-        Ok((simulators, (client, state_real, state_imag)))
+        Ok((simulators, (client, op_count, state_real, state_imag)))
     }
 
     fn swap(
         global_data: &mut (
             Rc<RefCell<ComputeClient<R>>>,
+            Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
         ),
@@ -774,7 +805,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         let num_qubits = num_local_qubits + num_global_qubits;
         let state_size = 1usize << num_qubits;
 
-        let (client, state_real, state_imag) = global_data;
+        let (client, _, state_real, state_imag) = global_data;
 
         let new_state_real = Rc::new(RefCell::new(
             client
@@ -818,12 +849,13 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
     fn print_global_state(
         global_data: &(
             Rc<RefCell<ComputeClient<R>>>,
+            Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
         ),
         _: &[Self],
     ) {
-        let (client, state_real, state_imag) = global_data;
+        let (client, _, state_real, state_imag) = global_data;
         let state_real = client.borrow().read_one(state_real.borrow().clone());
         let state_real = F::from_bytes(&state_real);
         let state_imag = client.borrow().read_one(state_imag.borrow().clone());
