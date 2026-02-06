@@ -17,6 +17,7 @@ use num::complex::Complex;
 use num::One;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use twox_hash::xxhash64::RandomState;
 
@@ -59,7 +60,7 @@ impl<F: FloatOps> Sparse<F> {
 
 impl<F: FloatOps> QuantumExecution for Sparse<F> {
     fn new(num_qubits: usize) -> Result<Self> {
-        let num_states = (num_qubits + 64) / 64;
+        let num_states = num_qubits.div_ceil(64);
 
         let mut state_0 = StateMap::<F>::default();
 
@@ -77,10 +78,11 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn pauli_x(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
+        let has_control = !control.is_empty();
 
         current_state.drain().for_each(|(state, amp)| {
             next_state.insert(
-                if ctrl_check_vec(&state, control) {
+                if !has_control || ctrl_check_vec(&state, control) {
                     bit_flip_vec(state, target)
                 } else {
                     state
@@ -92,13 +94,16 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
+        let has_control = !control.is_empty();
+        let i_complex = Complex::<F>::i();
+        let neg_i_complex = -i_complex;
 
         current_state.drain().for_each(|(state, mut amp)| {
-            if ctrl_check_vec(&state, control) {
+            if !has_control || ctrl_check_vec(&state, control) {
                 amp *= if is_one_at_vec(&state, target) {
-                    -Complex::<F>::i()
+                    neg_i_complex
                 } else {
-                    Complex::<F>::i()
+                    i_complex
                 };
                 next_state.insert(bit_flip_vec(state, target), amp);
             } else {
@@ -109,9 +114,10 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
         let current_state = self.get_current_state_mut();
+        let has_control = !control.is_empty();
 
         current_state.par_iter_mut().for_each(|(state, amp)| {
-            if ctrl_check_vec(state, control) && is_one_at_vec(state, target) {
+            if is_one_at_vec(state, target) && (!has_control || ctrl_check_vec(state, control)) {
                 *amp = -*amp;
             }
         });
@@ -119,21 +125,27 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn hadamard(&mut self, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
+        let has_control = !control.is_empty();
+
+        let epsilon = F::from(F::small_epsilon()).unwrap();
+        let epsilon_sqr = epsilon * epsilon;
+        let inv_sqrt_2 = F::FRAC_1_SQRT_2();
 
         current_state.drain().for_each(|(state, mut amp)| {
-            if ctrl_check_vec(&state, control) {
-                amp *= F::FRAC_1_SQRT_2();
+            if !has_control || ctrl_check_vec(&state, control) {
+                amp *= inv_sqrt_2;
                 let state_flipped = bit_flip_vec(Vec::clone(&state), target);
 
-                match next_state.get_mut(&state_flipped) {
-                    Some(c_amp) => {
+                match next_state.entry(state_flipped) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
                         *c_amp += amp;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state_flipped);
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state_flipped, amp);
+                    Entry::Vacant(entry) => {
+                        entry.insert(amp);
                     }
                 }
 
@@ -143,15 +155,16 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                     amp
                 };
 
-                match next_state.get_mut(&state) {
-                    Some(c_amp) => {
+                match next_state.entry(state) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
                         *c_amp += amp;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state);
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state, amp);
+                    Entry::Vacant(entry) => {
+                        entry.insert(amp);
                     }
                 }
             } else {
@@ -162,11 +175,12 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
         let current_state = self.get_current_state_mut();
+        let has_control = !control.is_empty();
 
         let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
 
         current_state.par_iter_mut().for_each(|(state, amp)| {
-            if ctrl_check_vec(state, control) && is_one_at_vec(state, target) {
+            if is_one_at_vec(state, target) && (!has_control || ctrl_check_vec(state, control)) {
                 *amp *= phase;
             }
         });
@@ -174,35 +188,46 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
+        let has_control = !control.is_empty();
 
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
+        let half_theta = F::from(theta / 2.0).unwrap();
+        let cons_theta_2 = Complex::<F>::from(F::cos(half_theta));
+        let sin_theta_2 = -Complex::<F>::i() * F::sin(half_theta);
+
+        let epsilon = F::from(F::small_epsilon()).unwrap();
+        let epsilon_sqr = epsilon * epsilon;
 
         current_state.drain().for_each(|(state, amp)| {
-            if ctrl_check_vec(&state, control) {
+            if !has_control || ctrl_check_vec(&state, control) {
                 let state_flipped = bit_flip_vec(Vec::clone(&state), target);
 
-                match next_state.get_mut(&state_flipped) {
-                    Some(c_amp) => {
-                        *c_amp += amp * sin_theta_2;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state_flipped);
+                // Branch 1: Flip
+                let flip_term = amp * sin_theta_2;
+                match next_state.entry(state_flipped) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
+                        *c_amp += flip_term;
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state_flipped, amp * sin_theta_2);
+                    Entry::Vacant(entry) => {
+                        entry.insert(flip_term);
                     }
                 }
 
-                match next_state.get_mut(&state) {
-                    Some(c_amp) => {
-                        *c_amp += amp * cons_theta_2;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state);
+                // Branch 2: Stay
+                let stay_term = amp * cons_theta_2;
+                match next_state.entry(state) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
+                        *c_amp += stay_term;
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state, amp * cons_theta_2);
+                    Entry::Vacant(entry) => {
+                        entry.insert(stay_term);
                     }
                 }
             } else {
@@ -213,14 +238,20 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
+        let has_control = !control.is_empty();
 
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
+        let half_theta = F::from(theta / 2.0).unwrap();
+        let cons_theta_2 = Complex::<F>::from(F::cos(half_theta));
+        let p_sin_theta_2 = Complex::<F>::from(F::sin(half_theta));
         let m_sin_theta_2 = -p_sin_theta_2;
 
+        let epsilon = F::from(F::small_epsilon()).unwrap();
+        let epsilon_sqr = epsilon * epsilon;
+
         current_state.drain().for_each(|(state, amp)| {
-            if ctrl_check_vec(&state, control) {
+            if !has_control || ctrl_check_vec(&state, control) {
                 let state_flipped = bit_flip_vec(Vec::clone(&state), target);
+
                 let flipped_amp = amp
                     * if is_one_at_vec(&state, target) {
                         m_sin_theta_2
@@ -228,27 +259,32 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                         p_sin_theta_2
                     };
 
-                match next_state.get_mut(&state_flipped) {
-                    Some(c_amp) => {
+                // Branch 1: Flip
+                match next_state.entry(state_flipped) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
                         *c_amp += flipped_amp;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state_flipped);
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state_flipped, flipped_amp);
+                    Entry::Vacant(entry) => {
+                        entry.insert(flipped_amp);
                     }
                 }
 
-                match next_state.get_mut(&state) {
-                    Some(c_amp) => {
-                        *c_amp += amp * cons_theta_2;
-                        if c_amp.norm() < F::from(F::small_epsilon()).unwrap() {
-                            next_state.remove(&state);
+                // Branch 2: Stay
+                let stay_amp = amp * cons_theta_2;
+                match next_state.entry(state) {
+                    Entry::Occupied(mut entry) => {
+                        let c_amp = entry.get_mut();
+                        *c_amp += stay_amp;
+                        if c_amp.norm_sqr() < epsilon_sqr {
+                            entry.remove();
                         }
                     }
-                    None => {
-                        next_state.insert(state, amp * cons_theta_2);
+                    Entry::Vacant(entry) => {
+                        entry.insert(stay_amp);
                     }
                 }
             } else {
@@ -259,12 +295,15 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
         let current_state = self.get_current_state_mut();
+        let has_control = !control.is_empty();
 
-        let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
-        let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
+        let half_theta = F::from(theta / 2.0).unwrap();
+        let i_complex = Complex::<F>::i();
+        let phase_0 = Complex::<F>::exp(i_complex * -half_theta);
+        let phase_1 = Complex::<F>::exp(i_complex * half_theta);
 
         current_state.par_iter_mut().for_each(|(state, amp)| {
-            if ctrl_check_vec(state, control) {
+            if !has_control || ctrl_check_vec(state, control) {
                 if is_one_at_vec(state, target) {
                     *amp *= phase_1;
                 } else {
@@ -281,7 +320,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
             .iter()
             .map(|(state, amp)| {
                 if is_one_at_vec(state, target) {
-                    amp.norm().powi(2)
+                    amp.norm_sqr() // Optimization: norm_sqr is faster than norm().powi(2)
                 } else {
                     F::zero()
                 }
@@ -294,9 +333,11 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
         let (current_state, next_state) = self.get_states();
 
+        let norm_factor = F::from(p).unwrap();
+
         current_state.drain().for_each(|(state, amp)| {
             if is_one_at_vec(&state, target) == result {
-                next_state.insert(state, amp * F::from(p).unwrap());
+                next_state.insert(state, amp * norm_factor);
             }
         });
     }

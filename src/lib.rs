@@ -18,6 +18,7 @@ pub mod dense_v2;
 pub mod error;
 pub mod quantum_execution;
 pub mod sparse;
+pub mod sparse_v2;
 
 pub trait FloatOps:
     num_traits::Float
@@ -67,3 +68,4 @@ pub type DenseGPUBlock = block::Block<
 pub type DenseGPUSBlockSimulator = quantum_execution::QubitManager<DenseGPUBlock>;
 
 pub type SparseSimulator = quantum_execution::QubitManager<sparse::Sparse<f32>>;
+pub type SparseV2Simulator = quantum_execution::QubitManager<sparse_v2::SparseV2<f32>>;

@@ -191,7 +191,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
             std::env::var("KBW_BLOCK_SIZE")
                 .unwrap_or_default()
                 .parse::<usize>()
-                .unwrap_or(16),
+                .unwrap_or(20),
         );
 
         // #[cfg(debug_assertions)]

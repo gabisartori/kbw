@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    error::KBWError, DenseGPUSimulator, DenseSimulator, DenseV2Simulator, SparseSimulator,
+    error::KBWError, DenseGPUSBlockSimulator, DenseGPUSimulator, DenseSimulator,
+    DenseV2BlockSimulator, DenseV2Simulator, SparseSimulator, SparseV2Simulator,
 };
 use env_logger::Builder;
 use ket::prelude::ExecutionTarget;
@@ -97,8 +98,14 @@ pub unsafe extern "C" fn kbw_make_configuration(
         Some(sample_base)
     };
 
+    // <version><simulator><processor><block?>
+    // Sparse = 1
+    // Dense = 2
+    // CPU = 1
+    // GPU = 2
+
     *result = Box::into_raw(Box::new(match simulator {
-        0 => DenseSimulator::configuration(
+        1110 => SparseSimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
@@ -106,7 +113,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
             classical_shadows,
             gradient,
         ),
-        1 => SparseSimulator::configuration(
+        1210 => SparseV2Simulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
@@ -114,7 +121,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
             classical_shadows,
             gradient,
         ),
-        2 => DenseV2Simulator::configuration(
+        2110 => DenseSimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
@@ -122,7 +129,31 @@ pub unsafe extern "C" fn kbw_make_configuration(
             classical_shadows,
             gradient,
         ),
-        3 => DenseGPUSimulator::configuration(
+        2210 => DenseV2Simulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            sample_base,
+            classical_shadows,
+            gradient,
+        ),
+        2211 => DenseV2BlockSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            sample_base,
+            classical_shadows,
+            gradient,
+        ),
+        2120 => DenseGPUSimulator::configuration(
+            num_qubits,
+            use_live,
+            coupling_graph,
+            sample_base,
+            classical_shadows,
+            gradient,
+        ),
+        2121 => DenseGPUSBlockSimulator::configuration(
             num_qubits,
             use_live,
             coupling_graph,
