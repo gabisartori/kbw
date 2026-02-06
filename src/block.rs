@@ -64,8 +64,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
             .iter()
             .enumerate()
             .min_by_key(|(_, &timestamp)| timestamp)
-            .map(|(index, _)| index)
-            .unwrap_or(0) // Fallback for 0 qubits, though usually checked in new()
+            .map_or(0, |(index, _)| index) // Fallback for 0 qubits, though usually checked in new()
     }
 
     const fn is_local(&self, qubit: usize) -> bool {

@@ -116,7 +116,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
                     ScalarArg::new(offset),
                 )
-                .unwrap()
+                .unwrap();
             },
         );
 
@@ -669,7 +669,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), state_size, 1),
                     ScalarArg::new(offset),
                 )
-                .unwrap()
+                .unwrap();
             },
         );
     }
@@ -762,7 +762,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                     ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
                     ScalarArg::new(offset),
                 )
-                .unwrap()
+                .unwrap();
             },
         );
 
