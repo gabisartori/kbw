@@ -315,13 +315,23 @@ impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
 
 impl<S: QuantumExecution + ExecutionFeatures> QubitManager<S> {
     fn submit_execution(&mut self, instructions: &[Instruction<usize>]) {
-        let pb = indicatif::ProgressBar::new(instructions.len() as u64);
-        pb.set_style(
-            indicatif::ProgressStyle::with_template(
-                "KBW: {percent_precise}% {wide_bar} Time: {elapsed}/{duration} (ETA: {eta})",
-            )
-            .unwrap(),
-        );
+        let pb = if std::env::var("KBW_PB")
+            .unwrap_or_default()
+            .parse::<bool>()
+            .unwrap_or(true)
+        {
+            let pb = indicatif::ProgressBar::new(instructions.len() as u64);
+            pb.set_style(
+                indicatif::ProgressStyle::with_template(
+                    "KBW: {percent_precise}% {wide_bar} Time: {elapsed}/{duration} (ETA: {eta})",
+                )
+                .unwrap(),
+            );
+            Some(pb)
+        } else {
+            None
+        };
+
         for instruction in instructions.iter().cloned() {
             match instruction {
                 Instruction::Gate {
@@ -367,9 +377,13 @@ impl<S: QuantumExecution + ExecutionFeatures> QubitManager<S> {
                 }
                 _ => {}
             }
-            pb.inc(1);
+            if let Some(pb) = &pb {
+                pb.inc(1)
+            };
         }
-        pb.finish_and_clear();
+        if let Some(pb) = &pb {
+            pb.finish_and_clear();
+        }
         if S::supports_gradient() {
             self.results.gradients = self.simulator.gradients();
         }
