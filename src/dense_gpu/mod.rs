@@ -112,11 +112,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     &client,
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
-                    ScalarArg::new(offset),
+                    ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
+                    ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
+                    offset,
                 )
-                .unwrap();
             },
         );
 
@@ -150,24 +149,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(x * stride_x),
-                        ScalarArg::new(y * stride_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        x * stride_x,
+                        y * stride_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -191,24 +181,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -232,24 +213,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -273,24 +245,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -314,26 +277,17 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(F::from(lambda.cos()).unwrap()),
-                        ScalarArg::new(F::from(lambda.sin()).unwrap()),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        F::from(lambda.cos()).unwrap(),
+                        F::from(lambda.sin()).unwrap(),
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -357,26 +311,17 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                        ScalarArg::new(F::from(-(theta / 2.0).sin()).unwrap()),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        F::from((theta / 2.0).cos()).unwrap(),
+                        F::from(-(theta / 2.0).sin()).unwrap(),
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -400,26 +345,17 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                        ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        F::from((theta / 2.0).cos()).unwrap(),
+                        F::from((theta / 2.0).sin()).unwrap(),
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -443,26 +379,17 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         cube_count.clone(),
                         cube_dim,
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ScalarArg::new(get_ctrl_mask(control)),
-                        ScalarArg::new(half_block_size),
-                        ScalarArg::new(full_block_size),
-                        ScalarArg::new(F::from((theta / 2.0).cos()).unwrap()),
-                        ScalarArg::new(F::from((theta / 2.0).sin()).unwrap()),
-                        ScalarArg::new(x * cube_size_x),
-                        ScalarArg::new(y * cube_size_y),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        get_ctrl_mask(control),
+                        half_block_size,
+                        full_block_size,
+                        F::from((theta / 2.0).cos()).unwrap(),
+                        F::from((theta / 2.0).sin()).unwrap(),
+                        x * cube_size_x,
+                        y * cube_size_y,
                     )
-                    .unwrap();
                 }
             }
         }
@@ -485,19 +412,18 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     &self.client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(&self.state_real.borrow(), self.state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), self.state_size, 1),
-                    ScalarArg::new(offset as usize),
-                    ScalarArg::new(self.offset),
-                    ArrayArg::from_raw_parts::<F>(&prob, prob_size, 1),
-                    ScalarArg::new(target as u32),
-                    ScalarArg::new(mask),
+                    ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                    ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                    offset as usize,
+                    self.offset,
+                    ArrayArg::from_raw_parts(prob.clone(), prob_size),
+                    target as u32,
+                    mask,
                 )
-                .unwrap();
             },
         );
 
-        let prob = self.client.borrow().read_one(prob);
+        let prob = self.client.borrow().read_one(prob).unwrap();
         let prob = F::from_bytes(&prob);
 
         *self.op_count.borrow_mut() = 0;
@@ -516,22 +442,13 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     &self.client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(
-                        &self.state_real.borrow_mut(),
-                        self.state_size,
-                        1,
-                    ),
-                    ArrayArg::from_raw_parts::<F>(
-                        &self.state_imag.borrow_mut(),
-                        self.state_size,
-                        1,
-                    ),
-                    ScalarArg::new(self.offset + offset as usize),
-                    ScalarArg::new(mask),
-                    ScalarArg::new(if result { mask } else { 0 }),
-                    ScalarArg::new(F::from(p).unwrap()),
+                    ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                    ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                    self.offset + offset as usize,
+                    mask,
+                    if result { mask } else { 0 },
+                    F::from(p).unwrap(),
                 )
-                .unwrap();
             },
         );
     }
@@ -542,12 +459,14 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
         let state_real = self
             .client
             .borrow()
-            .read_one(self.state_real.borrow().clone());
+            .read_one(self.state_real.borrow().clone())
+            .unwrap();
         let state_real = F::from_bytes(&state_real[offset_bytes_begin..offset_bytes_end]);
         let state_imag = self
             .client
             .borrow()
-            .read_one(self.state_imag.borrow().clone());
+            .read_one(self.state_imag.borrow().clone())
+            .unwrap();
         let state_imag = F::from_bytes(&state_imag[offset_bytes_begin..offset_bytes_end]);
 
         let (basis_states, amplitudes_real, amplitudes_imag): (Vec<_>, Vec<_>, Vec<_>) = state_real
@@ -617,24 +536,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         &self.client.borrow(),
                         CubeCount::new_1d(cube_count as u32),
                         CubeDim::new_1d(cube_dim as u32),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_real.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ArrayArg::from_raw_parts::<F>(
-                            &self.state_imag.borrow_mut(),
-                            self.state_size,
-                            1,
-                        ),
-                        ScalarArg::new(self.offset),
-                        ArrayArg::from_raw_parts::<F>(&prob, self.state_size, 1),
-                        ScalarArg::new(target_mask),
+                        ArrayArg::from_raw_parts(self.state_real.borrow().clone(), self.state_size),
+                        ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), self.state_size),
+                        self.offset,
+                        ArrayArg::from_raw_parts(prob.clone(), self.state_size),
+                        target_mask,
                     )
-                    .unwrap();
                 }
 
-                let prob = self.client.borrow().read_one(prob);
+                let prob = self.client.borrow().read_one(prob).unwrap();
                 let prob = F::from_bytes(&prob);
 
                 let result: F = prob.par_iter().copied().sum();
@@ -665,11 +575,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     &self.client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(&self.state_real.borrow(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&self.state_imag.borrow(), state_size, 1),
-                    ScalarArg::new(offset),
+                    ArrayArg::from_raw_parts(self.state_real.borrow().clone(), state_size),
+                    ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), state_size),
+                    offset,
                 )
-                .unwrap();
             },
         );
     }
@@ -758,11 +667,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                     &client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
-                    ScalarArg::new(offset),
+                    ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
+                    ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
+                    offset,
                 )
-                .unwrap();
             },
         );
 
@@ -826,20 +734,19 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                     &client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
-                    ArrayArg::from_raw_parts::<F>(&state_real.borrow(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&state_imag.borrow(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&new_state_real.borrow_mut(), state_size, 1),
-                    ArrayArg::from_raw_parts::<F>(&new_state_imag.borrow_mut(), state_size, 1),
-                    ScalarArg::new(offset),
-                    ScalarArg::new((global_qubit + num_local_qubits) as u32),
-                    ScalarArg::new(local_qubit as u32),
+                    ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
+                    ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
+                    ArrayArg::from_raw_parts(new_state_real.borrow_mut().clone(), state_size),
+                    ArrayArg::from_raw_parts(new_state_imag.borrow_mut().clone(), state_size),
+                    offset,
+                    (global_qubit + num_local_qubits) as u32,
+                    local_qubit as u32,
                 )
-                .unwrap();
             },
         );
 
         *state_real = Rc::clone(&new_state_real);
-        *state_imag = Rc::clone(state_imag);
+        *state_imag = Rc::clone(&new_state_imag);
         for simulator in simulators {
             simulator.state_real = Rc::clone(&new_state_real);
             simulator.state_imag = Rc::clone(&new_state_imag);
@@ -856,9 +763,15 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         _: &[Self],
     ) {
         let (client, _, state_real, state_imag) = global_data;
-        let state_real = client.borrow().read_one(state_real.borrow().clone());
+        let state_real = client
+            .borrow()
+            .read_one(state_real.borrow().clone())
+            .unwrap();
         let state_real = F::from_bytes(&state_real);
-        let state_imag = client.borrow().read_one(state_imag.borrow().clone());
+        let state_imag = client
+            .borrow()
+            .read_one(state_imag.borrow().clone())
+            .unwrap();
         let state_imag = F::from_bytes(&state_imag);
         let n = state_real.len().trailing_zeros() as usize;
 

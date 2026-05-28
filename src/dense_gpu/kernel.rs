@@ -466,10 +466,6 @@ pub(super) fn init_state<F: Float + ConstantFloat>(
     offset: u32,
 ) {
     let state = (offset + ABSOLUTE_POS_X) as usize;
-    state_real[state] = if state == 0 {
-        F::ONE.into()
-    } else {
-        F::ZERO.into()
-    };
+    state_real[state] = if state == 0 { F::ONE } else { F::ZERO };
     state_imag[state] = F::ZERO;
 }
