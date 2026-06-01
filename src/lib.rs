@@ -62,6 +62,7 @@ pub type DenseGPUBlock = block::Block<
         std::rc::Rc<std::cell::RefCell<usize>>,
         std::rc::Rc<std::cell::RefCell<cubecl::server::Handle>>,
         std::rc::Rc<std::cell::RefCell<cubecl::server::Handle>>,
+        usize,
     ),
     dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>,
 >;

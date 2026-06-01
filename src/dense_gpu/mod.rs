@@ -35,6 +35,7 @@ impl ConstantFloat for f32 {
     const MINUS_ONE: Self = -1.0f32;
     const FRAC_1_SQRT_2: Self = std::f32::consts::FRAC_1_SQRT_2;
 }
+
 pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> {
     state_real: Rc<RefCell<cubecl::server::Handle>>,
     state_imag: Rc<RefCell<cubecl::server::Handle>>,
@@ -78,17 +79,17 @@ where
 
 impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> DenseGPU<R, F> {
     fn sync(&mut self) {
-        let mut op_count = self.op_count.borrow_mut();
-        if *op_count * self.state_size > 10 << 27 {
+        if *self.op_count.borrow() * self.state_size > 10 << 27 {
             let client = self.client.borrow();
             let fut = async { client.sync().await };
             pollster::block_on(fut).unwrap();
-            *op_count = 0;
+            *self.op_count.borrow_mut() = 0;
         } else {
-            *op_count += 1;
+            *self.op_count.borrow_mut() += 1;
         }
     }
 }
+
 impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecution
     for DenseGPU<R, F>
 {
@@ -425,8 +426,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
 
         let prob = self.client.borrow().read_one(prob).unwrap();
         let prob = F::from_bytes(&prob);
-
-        *self.op_count.borrow_mut() = 0;
+        let prob = &prob[..prob_size];
 
         prob.par_iter().copied().sum::<F>().to_f64().unwrap()
     }
@@ -546,6 +546,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
 
                 let prob = self.client.borrow().read_one(prob).unwrap();
                 let prob = F::from_bytes(&prob);
+                let prob = &prob[..self.state_size];
 
                 let result: F = prob.par_iter().copied().sum();
 
@@ -592,7 +593,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
     }
 }
 
-impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> ExecutionFeatures
+impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat> ExecutionFeatures
     for DenseGPU<R, F>
 {
     fn feature_measure() -> Capability {
@@ -632,6 +633,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
+            usize,
         ),
     > for DenseGPU<R, F>
 {
@@ -645,6 +647,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
+            usize,
         ),
     )> {
         let num_qubits = num_local_qubits + num_global_qubits;
@@ -690,7 +693,10 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             });
         }
 
-        Ok((simulators, (client, op_count, state_real, state_imag)))
+        Ok((
+            simulators,
+            (client, op_count, state_real, state_imag, state_size),
+        ))
     }
 
     fn swap(
@@ -699,6 +705,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
+            usize,
         ),
         simulators: &mut [Self],
         num_global_qubits: usize,
@@ -713,7 +720,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         let num_qubits = num_local_qubits + num_global_qubits;
         let state_size = 1usize << num_qubits;
 
-        let (client, _, state_real, state_imag) = global_data;
+        let (client, _, state_real, state_imag, _) = global_data;
 
         let new_state_real = Rc::new(RefCell::new(
             client
@@ -759,20 +766,25 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             Rc<RefCell<usize>>,
             Rc<RefCell<Handle>>,
             Rc<RefCell<Handle>>,
+            usize,
         ),
         _: &[Self],
     ) {
-        let (client, _, state_real, state_imag) = global_data;
+        let (client, _, state_real_handle, state_imag_handle, state_size) = global_data;
         let state_real = client
             .borrow()
-            .read_one(state_real.borrow().clone())
+            .read_one(state_real_handle.borrow().clone())
             .unwrap();
         let state_real = F::from_bytes(&state_real);
+        let state_real = &state_real[..*state_size];
+
         let state_imag = client
             .borrow()
-            .read_one(state_imag.borrow().clone())
+            .read_one(state_imag_handle.borrow().clone())
             .unwrap();
         let state_imag = F::from_bytes(&state_imag);
+        let state_imag = &state_imag[..*state_size];
+
         let n = state_real.len().trailing_zeros() as usize;
 
         println!("==============");

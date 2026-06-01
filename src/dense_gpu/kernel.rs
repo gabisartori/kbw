@@ -392,16 +392,13 @@ pub(super) fn measure_collapse<F: Float + LaunchArg + ConstantFloat>(
     let state = ABSOLUTE_POS_X + offset as u32;
     let state_index = state as usize;
 
-    state_real[state_index] = if (state & target_mask) == result {
-        state_real[state_index] * p
+    if (state & target_mask) == result {
+        state_real[state_index] = state_real[state_index] * p;
+        state_imag[state_index] = state_imag[state_index] * p;
     } else {
-        F::ZERO.into()
-    };
-    state_imag[state_index] = if (state & target_mask) == result {
-        state_imag[state_index] * p
-    } else {
-        F::ZERO.into()
-    };
+        state_real[state_index] = F::ZERO;
+        state_imag[state_index] = F::ZERO;
+    }
 }
 
 #[cube]
@@ -426,11 +423,7 @@ pub(super) fn exp_value<F: Float + ConstantFloat>(
 ) {
     let state = ABSOLUTE_POS_X + offset as u32;
     let state_index = state as usize;
-    let sign: F = if parity_u32(state & target_mask) == 1 {
-        F::MINUS_ONE.into()
-    } else {
-        F::ONE.into()
-    };
+    let sign: F = select(parity_u32(state & target_mask) == 1, F::MINUS_ONE, F::ONE);
 
     prob[state_index] = sign
         * (state_real[state_index] * state_real[state_index]
@@ -466,6 +459,10 @@ pub(super) fn init_state<F: Float + ConstantFloat>(
     offset: u32,
 ) {
     let state = (offset + ABSOLUTE_POS_X) as usize;
-    state_real[state] = if state == 0 { F::ONE } else { F::ZERO };
+    if state == 0 {
+        state_real[state] = F::ONE;
+    } else {
+        state_real[state] = F::ZERO;
+    }
     state_imag[state] = F::ZERO;
 }
