@@ -2,26 +2,45 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::error::Result;
+//! Vec-based sparse state-vector simulator (V2).
+//!
+//! # Algorithm
+//!
+//! Unlike the [`crate::sparse`] (`HashMap`) backend, `SparseV2` stores the
+//! quantum state as a **sorted `Vec`** of `(state_key, amplitude)` pairs.
+//! After gates that can increase the number of basis states (Hadamard, Rx,
+//! Ry) the vector is re-sorted and a linear reduce pass merges duplicate keys
+//! and prunes near-zero amplitudes.
+//!
+//! # Trade-offs vs [`crate::sparse`]
+//!
+//! | | Sparse (HashMap) | SparseV2 (Vec) |
+//! |---|---|---|
+//! | Per-gate lookup | O(1) amortised | O(log k) binary search (not done) |
+//! | Cache efficiency | Poor (pointer-chasing) | Good (contiguous memory) |
+//! | Parallelism | Diagonal gates only | Any gate |
+//! | Post-Hadamard reduce | Entry-based | Sort + linear scan |
+
+use crate::bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec};
 use crate::quantum_execution::QuantumExecution;
 use crate::FloatOps;
-use crate::{
-    bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec},
-    quantum_execution::ExecutionFeatures,
-};
 use itertools::Itertools;
-use ket::execution::Capability;
-use ket::process::DumpData;
+use ket::error::KetError;
+use ket::execution::DumpData;
 use num::complex::Complex;
 use num::One;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 
 type StateVec<F> = Vec<(Vec<u64>, Complex<F>)>;
 
-#[derive(Serialize, Deserialize)]
+/// Vec-based sparse state-vector simulator generic over float type `F`.
+///
+/// Use the pre-defined type alias [`SparseV2`](crate::SparseV2) (`f32`) for
+/// typical workloads.
 pub struct SparseV2<F: FloatOps> {
     states: StateVec<F>,
+    /// Number of `u64` words needed to represent a single basis state
+    /// (= `ceil(num_qubits / 64)`).
     num_states: usize,
 }
 
@@ -66,7 +85,7 @@ impl<F: FloatOps> SparseV2<F> {
 }
 
 impl<F: FloatOps> QuantumExecution for SparseV2<F> {
-    fn new(num_qubits: usize) -> Result<Self> {
+    fn new(num_qubits: usize) -> Result<Self, KetError> {
         let num_states = num_qubits.div_ceil(64);
         let zero_state = vec![0; num_states];
         let states = vec![(zero_state, Complex::<F>::one())];
@@ -301,37 +320,5 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
     fn clear(&mut self) {
         let zero_state = vec![0; self.num_states];
         self.states = vec![(zero_state, Complex::<F>::one())];
-    }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-}
-
-impl<F: FloatOps> ExecutionFeatures for SparseV2<F> {
-    fn feature_measure() -> Capability {
-        Capability::Advanced
-    }
-    fn feature_sample() -> Capability {
-        Capability::Advanced
-    }
-    fn feature_exp_value() -> Capability {
-        Capability::Advanced
-    }
-    fn feature_dump() -> Capability {
-        Capability::Advanced
-    }
-    fn feature_need_decomposition() -> bool {
-        false
-    }
-    fn feature_allow_live() -> bool {
-        true
-    }
-    fn supports_gradient() -> bool {
-        false
     }
 }

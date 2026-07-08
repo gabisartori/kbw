@@ -3,25 +3,46 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::error::{KBWError, Result};
-use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+//! Double-buffered dense state-vector simulator.
+//!
+//! # Algorithm
+//!
+//! The quantum state is stored as a complex-valued vector of length `2^n`.
+//! Gate application is parallelised with [Rayon](https://docs.rs/rayon) by
+//! computing each output amplitude from the previous ("current") buffer and
+//! writing into the alternate ("next") buffer.  After every gate the two
+//! buffers swap roles via a boolean flag so that no allocation or copying is
+//! needed.
+//!
+//! # Limitations
+//!
+//! * Maximum **32 qubits** (memory: `2 × 2^32 × 8 B ≈ 64 GiB` for `f32`).
+//! * All operations run on the CPU; for GPU-accelerated dense simulation see
+//!   [`crate::dense_gpu`].
+
+use crate::quantum_execution::QuantumExecution;
 use crate::{
     bitwise::{bit_flip, get_ctrl_mask, is_one_at},
     FloatOps,
 };
 use itertools::Itertools;
-use ket::execution::Capability;
-use ket::process::DumpData;
-use log::error;
+use ket::error::KetError;
+use ket::execution::DumpData;
 use num::complex::Complex;
 use num::{One, Zero};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+/// Double-buffered dense state-vector simulator generic over float type `F`.
+///
+/// Use the pre-defined type alias [`Dense`](crate::Dense) (`f32`) for
+/// typical workloads, or instantiate `Dense<f64>` when higher precision is
+/// required.
+///
+/// Gates are applied in parallel across all `2^n` amplitudes using Rayon.
 pub struct Dense<F: FloatOps> {
     state_0: Vec<Complex<F>>,
     state_1: Vec<Complex<F>>,
+    /// `true` → current state lives in `state_0`; `false` → in `state_1`.
     state: bool,
     num_states: usize,
 }
@@ -46,10 +67,9 @@ impl<F: FloatOps> Dense<F> {
 }
 
 impl<F: FloatOps> QuantumExecution for Dense<F> {
-    fn new(num_qubits: usize) -> Result<Self> {
+    fn new(num_qubits: usize) -> Result<Self, KetError> {
         if num_qubits > 32 {
-            error!("dense implementation supports up to 32 qubits");
-            return Err(KBWError::UnsupportedNumberOfQubits);
+            return Err(KetError::ExecutionFailed);
         }
 
         let num_states = 1 << num_qubits;
@@ -353,43 +373,5 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
         self.state_1.resize(self.num_states, Complex::<F>::zero());
         self.state_0[0] = Complex::<F>::one();
         self.state = true;
-    }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-}
-
-impl<F: FloatOps> ExecutionFeatures for Dense<F> {
-    fn feature_measure() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_sample() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_exp_value() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_dump() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_need_decomposition() -> bool {
-        false
-    }
-
-    fn feature_allow_live() -> bool {
-        true
-    }
-
-    fn supports_gradient() -> bool {
-        false
     }
 }

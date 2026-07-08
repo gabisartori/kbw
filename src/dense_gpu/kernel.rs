@@ -47,7 +47,7 @@ pub(super) fn compute_cube_size(
 
     (
         half_block_size,
-        full_block_size as u32,
+        u32::try_from(full_block_size).unwrap(),
         (cube_count_2_x, cube_count_2_y),
         (stride_x, stride_y),
         CubeCount::new_2d(cube_count_x, cube_count_y),
@@ -379,7 +379,6 @@ pub(super) fn measure_p1<F: Float>(
     prob[compressed_idx as usize] = re * re + im * im;
 }
 
-#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
 pub(super) fn measure_collapse<F: Float + LaunchArg + ConstantFloat>(
     state_real: &mut Array<F>,
@@ -412,7 +411,6 @@ pub(super) const fn parity_u32(x: u32) -> u32 {
     v & 1
 }
 
-#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
 pub(super) fn exp_value<F: Float + ConstantFloat>(
     state_real: &Array<F>,
@@ -451,7 +449,6 @@ pub(super) fn copy_swap<F: Float>(
     new_state_imag[state as usize] = old_state_imag[src_state as usize];
 }
 
-#[allow(clippy::useless_conversion)]
 #[cube(launch_unchecked)]
 pub(super) fn init_state<F: Float + ConstantFloat>(
     state_real: &mut Array<F>,

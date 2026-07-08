@@ -5,7 +5,7 @@
 
 [package]
 name = "kbw"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["Evandro Chagas Ribeiro da Rosa <evandro@quantuloop.com>"]
 description = "Ket Bitwise Simulator"
 repository = "https://gitlab.com/quantum-ket/kbw"
@@ -18,27 +18,23 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = "0.6.0"
-num = { version = "0.4", features = ["serde"] }
-rand = "0.10.1"
+libket = { git = "https://gitlab.com/quantum-ket/libket.git", rev = "1c91960cf3b06b1a4044d0ea23b615aa6d476335" }
+num = { version = "0.4" }
+rand = "0.10.2"
 rayon = "1.12.0"
 twox-hash = "2.1.2"
-itertools = "0.14.0"
-log = "0.4.30"
-env_logger = "0.11.10"
+itertools = "0.15.0"
 thiserror = "2.0.18"
-indicatif = "0.18.4"
-build-info = { version = "0.0.44", default-features = false, features = [] }
+build-info = { version = "0.0.45", default-features = false, features = [] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-indexmap = "2.14.0"
 num-traits = "0.2"
 cubecl = { version = "0.10.0", features = ["wgpu"] }
 bimap = "0.6.3"
 pollster = "0.4.0"
 
 [build-dependencies]
-build-info-build = "0.0.44"
+build-info-build = "0.0.45"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

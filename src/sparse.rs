@@ -3,27 +3,49 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::error::Result;
+//! HashMap-based sparse state-vector simulator.
+//!
+//! # Algorithm
+//!
+//! Only basis states with non-zero amplitude are stored. The state is
+//! represented as `HashMap<Vec<u64>, Complex<F>>` keyed by the bit-string of
+//! each qubit (packed into 64-bit words).  This representation is efficient
+//! when the quantum state has few non-zero amplitudes (e.g. immediately after
+//! initialisation or in low-entanglement circuits).
+//!
+//! Amplitudes whose squared norm falls below `F::small_epsilon()^2` are
+//! pruned during gate application to keep the map compact.
+//!
+//! The hash map uses the [xxHash64](https://docs.rs/twox-hash) algorithm for
+//! fast, non-cryptographic hashing of byte-array keys.
+//!
+//! # Trade-offs vs [`crate::dense`]
+//!
+//! | | Dense | Sparse |
+//! |---|---|---|
+//! | Memory | O(2^n) | O(k) where k = non-zero amplitudes |
+//! | Gate cost | O(2^n) parallel | O(k) sequential |
+//! | Best for | genral case | one-hot encoding |
+
+use crate::bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec};
 use crate::quantum_execution::QuantumExecution;
 use crate::FloatOps;
-use crate::{
-    bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec},
-    quantum_execution::ExecutionFeatures,
-};
 use itertools::Itertools;
-use ket::execution::Capability;
-use ket::process::DumpData;
+use ket::error::KetError;
+use ket::execution::DumpData;
 use num::complex::Complex;
 use num::One;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use twox_hash::xxhash64::RandomState;
 
 type StateMap<F> = HashMap<Vec<u64>, Complex<F>, RandomState>;
 
-#[derive(Serialize, Deserialize)]
+/// HashMap-based sparse state-vector simulator generic over float type `F`.
+///
+/// Use the pre-defined type alias [`Sparse`](crate::Sparse) (`f32`) for
+/// typical workloads.
 pub struct Sparse<F: FloatOps> {
     state_0: StateMap<F>,
     state_1: StateMap<F>,
@@ -59,7 +81,7 @@ impl<F: FloatOps> Sparse<F> {
 }
 
 impl<F: FloatOps> QuantumExecution for Sparse<F> {
-    fn new(num_qubits: usize) -> Result<Self> {
+    fn new(num_qubits: usize) -> Result<Self, KetError> {
         let num_states = num_qubits.div_ceil(64);
 
         let mut state_0 = StateMap::<F>::default();
@@ -386,43 +408,5 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
         self.state_0.insert(zero, Complex::<F>::one());
         self.state = true;
-    }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-}
-
-impl<F: FloatOps> ExecutionFeatures for Sparse<F> {
-    fn feature_measure() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_sample() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_exp_value() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_dump() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_need_decomposition() -> bool {
-        false
-    }
-
-    fn feature_allow_live() -> bool {
-        true
-    }
-
-    fn supports_gradient() -> bool {
-        false
     }
 }

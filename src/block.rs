@@ -2,17 +2,46 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! Blocked quantum-state simulator.
+//!
+//! For qubit counts that exceed the local-memory capacity of a single simulator
+//! instance, this module partitions the full qubit register into two sets:
+//!
+//! * **Local qubits**: simulated by individual [`QuantumExecution`] instances
+//!   (one per global basis state). There are `2^num_global_qubits` such instances,
+//!   each holding a state vector of size `2^num_local_qubits`.
+//! * **Global qubits**: encoded in the *index* of the simulator instance. Gates
+//!   on global qubits require a cross-block SWAP (implemented by
+//!   [`BlockSimulator::swap`]) that physically moves the global qubit into the
+//!   local register before the gate is applied.
+//!
+//! The number of local qubits is controlled by the `KBW_BLOCK_SIZE` environment
+//! variable (default `20`).
+
 use bimap::BiMap;
-use ket::process::DumpData;
+use ket::{error::KetError, execution::DumpData};
 
-use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use crate::quantum_execution::QuantumExecution;
 
+/// Interface that a concrete simulator type must implement to participate in
+/// block-partitioned simulation.
+///
+/// `S` is the inner simulator (e.g. [`DenseV2`](crate::DenseV2)) and `G` is an
+/// arbitrary type that carries global state shared across all block instances
+/// (e.g. GPU device handles, shared memory buffers).
 pub trait BlockSimulator<S: QuantumExecution, G> {
+    /// Allocate `2^num_global_qubits` simulator instances, each covering
+    /// `num_local_qubits` qubits, together with the global shared data `G`.
     fn new_blocks(
         num_local_qubits: usize,
         num_global_qubits: usize,
-    ) -> crate::error::Result<(Vec<S>, G)>;
+    ) -> Result<(Vec<S>, G), KetError>;
 
+    /// Swap the amplitudes of `global_qubit` (encoded in the simulator index)
+    /// with `local_qubit` (a qubit inside every block simulator).
+    ///
+    /// After the swap the two qubits have exchanged their roles: the formerly
+    /// global qubit is now local and vice-versa.
     fn swap(
         global_data: &mut G,
         simulators: &mut [S],
@@ -22,6 +51,10 @@ pub trait BlockSimulator<S: QuantumExecution, G> {
         local_qubit: usize,
     );
 
+    /// Debug helper: print the entire joint state across all blocks.
+    ///
+    /// The default implementation panics: concrete backends that support
+    /// printing can override this.
     fn print_global_state(_global_data: &G, _simulators: &[S]) {
         unimplemented!()
     }
@@ -38,12 +71,28 @@ enum Gate {
     RZ(f64),
 }
 
+/// Top-level simulator that implements [`QuantumExecution`] over a partitioned
+/// set of inner simulator instances.
+///
+/// Logical qubits are transparently mapped to physical qubits; when a gate
+/// targets a *global* qubit the block calls [`BlockSimulator::swap`] to bring
+/// that qubit into the local register first (an LRU eviction policy chooses
+/// which local qubit to displace).
+///
+/// # Type parameters
+///
+/// * `G`: global shared state type (e.g. `()` for CPU backends, GPU handles
+///   for the WGPU backend).
+/// * `S`: inner simulator, must implement both [`QuantumExecution`] and
+///   [`BlockSimulator<S, G>`].
 pub struct Block<G, S: QuantumExecution + BlockSimulator<S, G>> {
     num_global_qubits: usize,
     num_local_qubits: usize,
     simulators: Vec<S>,
     global_data: G,
+    /// Bidirectional map: logical qubit ↔ physical qubit.
     logical_to_physical: BiMap<usize, usize>,
+    /// LRU timestamp per local physical qubit; updated on each gate access.
     qubit_last_access: Vec<u64>,
     access_counter: u64,
     gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
@@ -177,12 +226,14 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Drop for Block<G, S> {
 }
 
 impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G, S> {
-    fn new(num_qubits: usize) -> crate::error::Result<Self>
+    fn new(num_qubits: usize) -> Result<Self, KetError>
     where
         Self: Sized,
     {
-        if num_qubits == 1 {
-            return Err(crate::error::KBWError::UnsupportedNumberOfQubits);
+        // A single qubit cannot be meaningfully split into local and global
+        // partitions (we need at least 1 local + 1 global qubit).
+        if num_qubits <= 1 {
+            return Err(KetError::ExecutionFailed);
         }
 
         let block_size = std::cmp::min(
@@ -288,7 +339,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
         }
     }
 
-    fn dump(&mut self, logical_qubits: &[usize]) -> ket::process::DumpData {
+    fn dump(&mut self, logical_qubits: &[usize]) -> DumpData {
         self.execute_gates();
 
         let physical_qubits: Vec<_> = logical_qubits
@@ -319,7 +370,7 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
                     .reduce(|a, b| a | b)
                     .unwrap_or(0);
 
-                let state = s[0] as usize | global_state;
+                let state = usize::try_from(s[0]).unwrap() | global_state;
                 global_dump.basis_states.push(vec![state as u64]);
                 global_dump.amplitudes_real.push(*r);
                 global_dump.amplitudes_imag.push(*i);
@@ -350,45 +401,5 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
 
     fn clear(&mut self) {
         *self = Self::new(self.num_global_qubits + self.num_local_qubits).unwrap();
-    }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-}
-
-impl<G, S: QuantumExecution + BlockSimulator<S, G> + ExecutionFeatures> ExecutionFeatures
-    for Block<G, S>
-{
-    fn feature_measure() -> ket::execution::Capability {
-        S::feature_measure()
-    }
-
-    fn feature_sample() -> ket::execution::Capability {
-        S::feature_sample()
-    }
-
-    fn feature_exp_value() -> ket::execution::Capability {
-        S::feature_exp_value()
-    }
-
-    fn feature_dump() -> ket::execution::Capability {
-        S::feature_dump()
-    }
-
-    fn feature_need_decomposition() -> bool {
-        S::feature_need_decomposition()
-    }
-
-    fn feature_allow_live() -> bool {
-        S::feature_allow_live()
-    }
-
-    fn supports_gradient() -> bool {
-        false
     }
 }

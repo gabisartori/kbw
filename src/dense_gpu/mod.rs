@@ -7,15 +7,15 @@ mod kernel;
 use crate::{
     bitwise::{get_ctrl_mask, is_one_at},
     block::BlockSimulator,
-    quantum_execution::{ExecutionFeatures, QuantumExecution},
+    quantum_execution::QuantumExecution,
     FloatOps,
 };
 use cubecl::{prelude::*, server::Handle};
 use itertools::Itertools;
 use ket::{
-    execution::Capability,
-    prelude::{Hamiltonian, Pauli},
-    process::DumpData,
+    error::KetError,
+    execution::DumpData,
+    ir::hamiltonian::{Hamiltonian, Pauli},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{cell::RefCell, fmt::Display, marker::PhantomData, rc::Rc};
@@ -93,7 +93,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> DenseGPU<R, 
 impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecution
     for DenseGPU<R, F>
 {
-    fn new(num_qubits: usize) -> crate::error::Result<Self>
+    fn new(num_qubits: usize) -> Result<Self, KetError>
     where
         Self: Sized,
     {
@@ -116,7 +116,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
                     ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
                     offset,
-                )
+                );
             },
         );
 
@@ -158,7 +158,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         full_block_size,
                         x * stride_x,
                         y * stride_y,
-                    )
+                    );
                 }
             }
         }
@@ -190,7 +190,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         full_block_size,
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -222,7 +222,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         full_block_size,
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -254,7 +254,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         full_block_size,
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -288,7 +288,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         F::from(lambda.sin()).unwrap(),
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -322,7 +322,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         F::from(-(theta / 2.0).sin()).unwrap(),
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -356,7 +356,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         F::from((theta / 2.0).sin()).unwrap(),
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -390,7 +390,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         F::from((theta / 2.0).sin()).unwrap(),
                         x * cube_size_x,
                         y * cube_size_y,
-                    )
+                    );
                 }
             }
         }
@@ -420,7 +420,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     ArrayArg::from_raw_parts(prob.clone(), prob_size),
                     target as u32,
                     mask,
-                )
+                );
             },
         );
 
@@ -448,7 +448,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     mask,
                     if result { mask } else { 0 },
                     F::from(p).unwrap(),
-                )
+                );
             },
         );
     }
@@ -501,7 +501,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
         }
     }
 
-    fn exp_value(&mut self, hamiltonian: &Hamiltonian<usize>) -> f64 {
+    fn exp_value(&mut self, hamiltonian: &Hamiltonian) -> f64 {
         let (cube_count, cube_dim) = if self.num_qubits <= 10 {
             (1, self.state_size)
         } else {
@@ -509,17 +509,19 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
         };
 
         hamiltonian
-            .products
+            .pauli_strings
             .iter()
             .map(|pauli_terms| {
-                pauli_terms.iter().for_each(|term| match term.pauli {
-                    Pauli::PauliX => self.hadamard(term.qubit, &[]),
-                    Pauli::PauliY => {
-                        self.phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[]);
-                        self.hadamard(term.qubit, &[]);
+                for term in pauli_terms {
+                    match term.pauli {
+                        Pauli::PauliX => self.hadamard(term.qubit, &[]),
+                        Pauli::PauliY => {
+                            self.phase(-std::f64::consts::FRAC_PI_2, term.qubit, &[]);
+                            self.hadamard(term.qubit, &[]);
+                        }
+                        Pauli::PauliZ => {}
                     }
-                    Pauli::PauliZ => {}
-                });
+                }
 
                 let prob = self
                     .client
@@ -541,7 +543,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                         self.offset,
                         ArrayArg::from_raw_parts(prob.clone(), self.state_size),
                         target_mask,
-                    )
+                    );
                 }
 
                 let prob = self.client.borrow().read_one(prob).unwrap();
@@ -579,49 +581,9 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     ArrayArg::from_raw_parts(self.state_real.borrow().clone(), state_size),
                     ArrayArg::from_raw_parts(self.state_imag.borrow().clone(), state_size),
                     offset,
-                )
+                );
             },
         );
-    }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!("save quantum state is not available for KBW::DENSE::GPU")
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!("load quantum state is not available for KBW::DENSE::GPU")
-    }
-}
-
-impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat> ExecutionFeatures
-    for DenseGPU<R, F>
-{
-    fn feature_measure() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_sample() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_exp_value() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_dump() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_need_decomposition() -> bool {
-        false
-    }
-
-    fn feature_allow_live() -> bool {
-        true
-    }
-
-    fn supports_gradient() -> bool {
-        false
     }
 }
 
@@ -640,16 +602,19 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
     fn new_blocks(
         num_local_qubits: usize,
         num_global_qubits: usize,
-    ) -> crate::error::Result<(
-        Vec<Self>,
+    ) -> Result<
         (
-            Rc<RefCell<ComputeClient<R>>>,
-            Rc<RefCell<usize>>,
-            Rc<RefCell<Handle>>,
-            Rc<RefCell<Handle>>,
-            usize,
+            Vec<Self>,
+            (
+                Rc<RefCell<ComputeClient<R>>>,
+                Rc<RefCell<usize>>,
+                Rc<RefCell<Handle>>,
+                Rc<RefCell<Handle>>,
+                usize,
+            ),
         ),
-    )> {
+        KetError,
+    > {
         let num_qubits = num_local_qubits + num_global_qubits;
 
         let device = Default::default();
@@ -673,7 +638,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                     ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
                     ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
                     offset,
-                )
+                );
             },
         );
 
@@ -748,7 +713,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
                     offset,
                     (global_qubit + num_local_qubits) as u32,
                     local_qubit as u32,
-                )
+                );
             },
         );
 

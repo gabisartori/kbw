@@ -9,26 +9,25 @@ stages:
   - deploy
 
 cargo-clippy:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.94
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
   stage: lint
   script:
     - cargo clippy --all-features -- -D warnings
 
 reuse:
-  image: python:slim
+  image: ghcr.io/astral-sh/uv:python3.10-trixie-slim
   stage: lint
   script:
-    - pip install reuse
-    - reuse lint
+    - uvx reuse[charset-normalizer] lint
 
 cargo-test:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.94
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
   stage: test
   script:
     - cargo test --all-features
 
 linux-build:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.94
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
   stage: build
   script:
     - cargo build --release
@@ -37,7 +36,7 @@ linux-build:
       - target/release/libkbw.so
 
 windows-build:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:windows-1.94
+  image: registry.gitlab.com/quantum-ket/ket-building-images:windows-1.96.1
   stage: build
   script:
     - cargo build --release --target x86_64-pc-windows-gnu

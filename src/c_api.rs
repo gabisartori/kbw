@@ -3,176 +3,122 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    error::KBWError, DenseGPUSBlockSimulator, DenseGPUSimulator, DenseSimulator,
-    DenseV2BlockSimulator, DenseV2Simulator, SparseSimulator, SparseV2Simulator,
-};
-use env_logger::Builder;
-use ket::prelude::ExecutionTarget;
-use log::LevelFilter;
+//! C-compatible ABI for embedding KBW in foreign-language runtimes.
+//!
+//! This module exports two `extern "C"` symbols:
+//!
+//! * [`kbw_make_configuration`]: create a [`QPUConfig`] for a named simulator
+//!   and write a heap-allocated pointer to the caller-supplied out-parameter.
+//! * [`kbw_build_info`]: return a static string describing the build
+//!   (crate name, version, compiler, target triple).
+//!
+//! Callers are responsible for freeing the `QPUConfig` pointer returned by
+//! `kbw_make_configuration` via the Ket runtime's own cleanup path.
 
-#[no_mangle]
-pub extern "C" fn kbw_set_log_level(level: u32) -> i32 {
-    let level = match level {
-        0 => LevelFilter::Off,
-        1 => LevelFilter::Error,
-        2 => LevelFilter::Warn,
-        3 => LevelFilter::Info,
-        4 => LevelFilter::Debug,
-        5 => LevelFilter::Trace,
-        _ => LevelFilter::max(),
-    };
+use std::ffi::{c_char, CStr};
 
-    Builder::new().filter_level(level).init();
+use crate::{Dense, DenseGPUBlock, DenseV2, Sparse, SparseV2};
+use ket::{error::KetError, process::QPUConfig};
 
-    KBWError::Success.error_code()
-}
+use crate::quantum_execution::QubitManager;
 
-pub mod error {
-    use crate::error::{KBWError, Result};
-
-    /// Returns the error message for the given error code.
-    ///
-    /// # Safety
-    ///
-    /// This functions is unsafe because it assumes that the error code is valid.
-    #[no_mangle]
-    pub unsafe extern "C" fn kbw_error_message(
-        error_code: i32,
-        buffer: *mut u8,
-        buffer_size: usize,
-        write_size: &mut usize,
-    ) -> i32 {
-        let msg = unsafe { KBWError::from_error_code(error_code) }.to_string();
-        let msg = msg.as_bytes();
-        *write_size = msg.len();
-        if buffer_size >= *write_size {
-            let buffer = unsafe { std::slice::from_raw_parts_mut(buffer, buffer_size) };
-            buffer[..*write_size].copy_from_slice(msg);
-            0
-        } else {
-            1
-        }
-    }
-
-    #[must_use]
-    pub const fn wrapper(error: Result<()>) -> i32 {
-        match error {
-            Ok(()) => KBWError::Success.error_code(),
-            Err(error) => error.error_code(),
-        }
-    }
-}
-
+/// Create a [`QPUConfig`] for the requested simulator and write the heap
+/// pointer into `*qpu_config`.
+///
+/// # Parameters
+///
+/// * `num_qubits`: number of qubits to allocate.
+/// * `simulator`: NUL-terminated C string naming the backend.  Recognised
+///   values (case-insensitive, whitespace ignored): `"dense"`, `"densev2"`,
+///   `"densegpu"`, `"sparse"`, `"sparsev2"`.
+/// * `use_live`: `true` for live (gate-by-gate) mode; `false` for batch mode.
+/// * `gradient`: enable the parameter-shift-rule gradient strategy (batch
+///   mode only).
+/// * `coupling_graph_json`: JSON-encoded `Vec<[usize; 2]>` describing allowed
+///   two-qubit pairs, or a JSON `null` for all-to-all connectivity.
+/// * `qpu_config`: out-parameter; set to the newly allocated config on
+///   success.
+///
+/// # Returns
+///
+/// A `KetError` integer code: `0` on success, non-zero on failure.
+///
 /// # Safety
+///
+/// * `simulator` must be a valid, NUL-terminated C string.
+/// * `coupling_graph_json` must be a valid, NUL-terminated C string containing
+///   either a JSON array of two-element integer arrays or `null`.
+/// * `qpu_config` must be a non-null, aligned, writable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn kbw_make_configuration(
     num_qubits: usize,
-    simulator: i32,
+    simulator: *const c_char,
     use_live: bool,
-    coupling_graph: *const (usize, usize),
-    coupling_graph_size: usize,
     gradient: bool,
-    sample_base: usize,
-    classical_shadows: *const usize,
-    result: &mut *mut (ExecutionTarget, Option<ket::execution::QuantumExecution>),
+    coupling_graph_json: *const c_char,
+    qpu_config: &mut *mut QPUConfig,
 ) -> i32 {
-    let coupling_graph = if coupling_graph.is_null() {
-        None
-    } else {
-        let coupling_graph =
-            unsafe { std::slice::from_raw_parts(coupling_graph, coupling_graph_size) };
-        Some(coupling_graph.to_vec())
+    let Ok(simulator) = (unsafe { CStr::from_ptr(simulator).to_str() }) else {
+        return KetError::ExecutionFailed.error_code();
     };
 
-    let classical_shadows = if classical_shadows.is_null() {
-        None
-    } else {
-        let cs = unsafe { std::slice::from_raw_parts(classical_shadows, 5) };
-        Some(((cs[0] as u8, cs[1] as u8, cs[2] as u8), cs[3], cs[4]))
+    let mut simulator = simulator.to_lowercase();
+    simulator.retain(|c| !c.is_whitespace());
+
+    let Ok(Ok(coupling_graph)) = unsafe { CStr::from_ptr(coupling_graph_json) }
+        .to_str()
+        .map(serde_json::from_str)
+    else {
+        return KetError::SerdeError.error_code();
     };
 
-    let sample_base = if sample_base == 0 {
-        None
-    } else {
-        Some(sample_base)
+    let config = match simulator.as_str() {
+        "dense" => make_config::<Dense>(num_qubits, use_live, coupling_graph, gradient),
+        "densev2" => make_config::<DenseV2>(num_qubits, use_live, coupling_graph, gradient),
+        "densegpu" => make_config::<DenseGPUBlock>(num_qubits, use_live, coupling_graph, gradient),
+        "sparse" => make_config::<Sparse>(num_qubits, use_live, coupling_graph, gradient),
+        "sparsev2" => make_config::<SparseV2>(num_qubits, use_live, coupling_graph, gradient),
+        _ => Err(KetError::ExecutionFailed),
     };
 
-    // <version><simulator><processor><block?>
-    // Sparse = 1
-    // Dense = 2
-    // CPU = 1
-    // GPU = 2
+    match config {
+        Ok(config) => {
+            *qpu_config = Box::into_raw(Box::new(config));
+            KetError::Success.error_code()
+        }
+        Err(err) => err.error_code(),
+    }
+}
 
-    *result = Box::into_raw(Box::new(match simulator {
-        1110 => SparseSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        1210 => SparseV2Simulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        2110 => DenseSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        2210 => DenseV2Simulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        2211 => DenseV2BlockSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        2120 => DenseGPUSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        2121 => DenseGPUSBlockSimulator::configuration(
-            num_qubits,
-            use_live,
-            coupling_graph,
-            sample_base,
-            classical_shadows,
-            gradient,
-        ),
-        _ => return KBWError::InvalidSimulator.error_code(),
-    }));
-
-    KBWError::Success.error_code()
+fn make_config<S>(
+    num_qubits: usize,
+    use_live: bool,
+    coupling_graph: Option<Vec<(usize, usize)>>,
+    gradient: bool,
+) -> Result<QPUConfig, KetError>
+where
+    S: crate::quantum_execution::QuantumExecution + 'static,
+    QubitManager<S>: ket::execution::LiveExecution + ket::execution::BatchExecution,
+{
+    if coupling_graph.is_none() && use_live {
+        QubitManager::<S>::make_live_config(num_qubits)
+    } else {
+        QubitManager::<S>::make_batch_config(num_qubits, coupling_graph, gradient)
+    }
 }
 
 const BUILD_INFO: &str = build_info::format!("{} v{} [{} {}]", $.crate_info.name, $.crate_info.version, $.compiler, $.target);
 
+/// Return a static string describing the KBW build.
+///
+/// Sets `*msg` to the UTF-8 bytes of the build-info string and `*size` to
+/// its byte length.  The pointer is valid for the lifetime of the process.
+///
+/// Returns a `KetError` integer code (always `0` = success).
 #[no_mangle]
 pub const extern "C" fn kbw_build_info(msg: &mut *const u8, size: &mut usize) -> i32 {
     let bytes = BUILD_INFO.as_bytes();
     *size = bytes.len();
     *msg = bytes.as_ptr();
-    KBWError::Success.error_code()
+    KetError::Success.error_code()
 }

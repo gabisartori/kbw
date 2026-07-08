@@ -2,26 +2,45 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! In-place dense state-vector simulator (V2).
+//!
+//! # Algorithm
+//!
+//! Unlike the double-buffered [`crate::dense`] backend, `DenseV2` stores only
+//! a **single** state vector.  Gates operate on pairs of amplitudes
+//! `(|…0…⟩, |…1…⟩)` in-place by splitting each block of `2^(target+1)`
+//! elements at the midpoint.  This halves the memory footprint at the cost of
+//! a slightly more complex iteration pattern.
+//!
+//! The inner loop is parallelised with [Rayon](https://docs.rs/rayon).
+//!
+//! # Limitations
+//!
+//! * Maximum **32 qubits**.
+//! * All operations run on the CPU.
+
 use std::fmt::Display;
 
 use crate::block::BlockSimulator;
-use crate::error::{KBWError, Result};
-use crate::quantum_execution::{ExecutionFeatures, QuantumExecution};
+use crate::quantum_execution::QuantumExecution;
 use crate::{
     bitwise::{get_ctrl_mask, is_one_at},
     FloatOps,
 };
 use itertools::Itertools;
-use ket::execution::Capability;
-use ket::process::DumpData;
-use log::error;
+use ket::error::KetError;
+use ket::execution::DumpData;
 use num::complex::ComplexFloat;
 use num::Zero;
 use num::{Complex, One};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+/// In-place dense state-vector simulator generic over float type `F`.
+///
+/// Use the pre-defined type alias [`DenseV2`](crate::DenseV2) (`f32`) for
+/// typical workloads.
+///
+/// The inner `Vec` stores amplitudes as `[a_0, a_1, …, a_{2^n - 1}]`.
 pub struct DenseV2<F: FloatOps>(Vec<Complex<F>>);
 
 impl<F: FloatOps> DenseV2<F> {
@@ -56,13 +75,12 @@ impl<F: FloatOps> DenseV2<F> {
 }
 
 impl<F: FloatOps> QuantumExecution for DenseV2<F> {
-    fn new(num_qubits: usize) -> Result<Self>
+    fn new(num_qubits: usize) -> Result<Self, KetError>
     where
         Self: Sized,
     {
         if num_qubits > 32 {
-            error!("dense implementation supports up to 32 qubits");
-            return Err(KBWError::UnsupportedNumberOfQubits);
+            return Err(KetError::ExecutionFailed);
         }
 
         let num_states = 1 << num_qubits;
@@ -239,51 +257,13 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
         self.0.fill(Complex::<F>::zero());
         self.0[0] = Complex::<F>::one();
     }
-
-    fn save(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    fn load(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-}
-
-impl<F: FloatOps> ExecutionFeatures for DenseV2<F> {
-    fn feature_measure() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_sample() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_exp_value() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_dump() -> Capability {
-        Capability::Advanced
-    }
-
-    fn feature_need_decomposition() -> bool {
-        false
-    }
-
-    fn feature_allow_live() -> bool {
-        true
-    }
-
-    fn supports_gradient() -> bool {
-        false
-    }
 }
 
 impl<F: FloatOps + Display> BlockSimulator<Self, ()> for DenseV2<F> {
     fn new_blocks(
         num_local_qubits: usize,
         num_global_qubits: usize,
-    ) -> crate::error::Result<(Vec<Self>, ())> {
+    ) -> Result<(Vec<Self>, ()), KetError> {
         let mut simulators = vec![Self::new(num_local_qubits)?];
         let num_states = 1 << num_local_qubits;
 

@@ -3,18 +3,32 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! Core execution traits and the [`QubitManager`] adapter.
+//!
+//! This module defines two levels of abstraction:
+//!
+//! 1. **[`QuantumExecution`]**: the low-level trait that every simulator
+//!    backend must implement.  It exposes one method per primitive quantum
+//!    operation (gates, measurement, dump, …).
+//!
+//! 2. **[`QubitManager`]**: a generic adapter that wraps any
+//!    `QuantumExecution` implementor and provides the higher-level
+//!    [`LiveExecution`] and [`BatchExecution`] interfaces expected by the
+//!    `ket` runtime.  It also owns the random-number generator (seeded from
+//!    `KBW_SEED`) that is used for measurement sampling.
+
 use itertools::Itertools;
-use ket::ir::gate::Param;
-use ket::ir::instructions::Instruction;
-use ket::ir::qubit::{LogicalQubit, Qubit};
-use ket::prelude::*;
-use ket::process::Sample;
 use ket::{
+    error::KetError,
     execution::{
-        BatchExecution, Capability, ExecutionProtocol, ExpValueStrategy, Gradient, LiveExecution,
-        ResultData,
+        BatchExecution, DumpData, GradientStrategy, LiveExecution, NativeGate,
+        QuantumExecution as KetQuantumExecution, SampleData,
     },
-    process::DumpData,
+    ir::{
+        gate::{GateInstruction, QuantumGate},
+        hamiltonian::{Hamiltonian, Pauli},
+    },
+    process::QPUConfig,
 };
 use num::Integer;
 use rand::distr::weighted::WeightedIndex;
@@ -22,38 +36,79 @@ use rand::distr::Distribution;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{
-    convert::{from_dump_to_prob, from_prob_to_shots},
-    error::Result,
-};
+use crate::convert::{from_dump_to_prob, from_prob_to_shots};
+
+/// Low-level interface that every simulator backend must satisfy.
+///
+/// Implementors are generic over the floating-point precision through the
+/// [`FloatOps`](crate::FloatOps) trait bound used internally.  Consumers
+/// interact with them exclusively through the `f64`-typed public methods
+/// listed here so that gate angles and measurement probabilities are always
+/// exchanged at full double precision.
 pub trait QuantumExecution {
-    fn new(num_qubits: usize) -> Result<Self>
+    /// Create a fresh `|0⟩^n` state for `num_qubits` qubits.
+    ///
+    /// Returns `Err` when the backend cannot handle the requested size
+    /// (e.g. the dense backend rejects `num_qubits > 32`).
+    fn new(num_qubits: usize) -> Result<Self, KetError>
     where
         Self: Sized;
+
+    /// Apply the Pauli-X (NOT) gate, optionally controlled on `control` qubits.
     fn pauli_x(&mut self, target: usize, control: &[usize]);
+
+    /// Apply the Pauli-Y gate, optionally controlled on `control` qubits.
     fn pauli_y(&mut self, target: usize, control: &[usize]);
+
+    /// Apply the Pauli-Z gate, optionally controlled on `control` qubits.
     fn pauli_z(&mut self, target: usize, control: &[usize]);
+
+    /// Apply the Hadamard gate, optionally controlled on `control` qubits.
     fn hadamard(&mut self, target: usize, control: &[usize]);
+
+    /// Apply a phase gate `diag(1, e^{iλ})`, optionally controlled.
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]);
+
+    /// Apply an X-rotation `Rx(θ)`, optionally controlled.
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]);
+
+    /// Apply a Y-rotation `Ry(θ)`, optionally controlled.
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]);
+
+    /// Apply a Z-rotation `Rz(θ)`, optionally controlled.
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]);
+
+    /// Return the probability that `target` would be measured as `|1⟩`.
+    ///
+    /// Does **not** collapse the state.
     fn measure_p1(&mut self, target: usize) -> f64;
+
+    /// Collapse the state after a measurement of `target`.
+    ///
+    /// `result` is the observed outcome and `p` is `1 / sqrt(P(result))`,
+    /// the renormalisation factor.
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64);
+
+    /// Extract the (partial) state vector for the given `qubits`.
     fn dump(&mut self, qubits: &[usize]) -> DumpData;
 
-    fn gradients(&mut self) -> Option<Vec<f64>> {
-        None
-    }
-
-    fn sample<R: Rng>(&mut self, qubits: &[usize], shots: usize, rng: &mut R) -> Sample {
+    /// Draw samples from the distribution defined by `qubits`.
+    ///
+    /// The default implementation delegates to [`dump`](Self::dump) and then
+    /// converts probabilities to a shot histogram.
+    fn sample<R: Rng>(&mut self, qubits: &[usize], shots: usize, rng: &mut R) -> SampleData {
         let data = self.dump(qubits);
-        from_prob_to_shots(from_dump_to_prob(data), shots, rng)
+        from_prob_to_shots(&from_dump_to_prob(data), shots, rng)
     }
 
-    fn exp_value(&mut self, hamiltonian: &Hamiltonian<usize>) -> f64 {
+    /// Compute the expectation value `⟨ψ|H|ψ⟩` of a Hamiltonian.
+    ///
+    /// The default implementation converts each Pauli string to a Z-basis
+    /// measurement via Hadamard / phase rotations, reads the resulting
+    /// probability distribution, and accumulates the weighted parity sum.
+    fn exp_value(&mut self, hamiltonian: &Hamiltonian) -> f64 {
         hamiltonian
-            .products
+            .pauli_strings
             .iter()
             .map(|pauli_terms| {
                 pauli_terms.iter().for_each(|term| match term.pauli {
@@ -102,31 +157,28 @@ pub trait QuantumExecution {
             .sum()
     }
 
+    /// Reset the simulator to the `|0⟩^n` state.
     fn clear(&mut self);
-
-    fn save(&self) -> Vec<u8>;
-    fn load(&mut self, data: &[u8]);
 }
 
+/// Wraps any [`QuantumExecution`] backend and adapts it to the
+/// [`LiveExecution`] and [`BatchExecution`] interfaces expected by the
+/// `ket` runtime.
+///
+/// A single `QubitManager` owns the RNG seeded from the `KBW_SEED`
+/// environment variable so that all stochastic operations (measurement,
+/// sampling) are reproducible when a seed is set.
 pub struct QubitManager<S: QuantumExecution> {
     simulator: S,
     rng: StdRng,
-    results: ResultData,
-    parameters: Vec<f64>,
 }
 
-pub trait ExecutionFeatures {
-    fn feature_measure() -> Capability;
-    fn feature_sample() -> Capability;
-    fn feature_exp_value() -> Capability;
-    fn feature_dump() -> Capability;
-    fn feature_need_decomposition() -> bool;
-    fn feature_allow_live() -> bool;
-    fn supports_gradient() -> bool;
-}
-
-impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
-    pub fn new(num_qubits: usize) -> Result<Self> {
+impl<S: QuantumExecution> QubitManager<S> {
+    /// Create a new `QubitManager` for `num_qubits` qubits.
+    ///
+    /// The RNG is seeded from the `KBW_SEED` environment variable when it
+    /// contains a valid `u64`; otherwise a random seed is used.
+    pub fn new(num_qubits: usize) -> Result<Self, KetError> {
         let seed = std::env::var("KBW_SEED")
             .unwrap_or_default()
             .parse::<u64>()
@@ -135,94 +187,71 @@ impl<S: QuantumExecution + ExecutionFeatures + 'static> QubitManager<S> {
         Ok(Self {
             simulator: S::new(num_qubits)?,
             rng: StdRng::seed_from_u64(seed),
-            results: Default::default(),
-            parameters: Vec::new(),
         })
     }
 
-    #[must_use]
-    pub fn configuration(
-        num_qubits: usize,
-        use_live: bool,
-        coupling_graph: Option<Vec<(usize, usize)>>,
-        sample_base: Option<usize>,
-        classical_shadows: Option<((u8, u8, u8), usize, usize)>,
-        gradient: bool,
-    ) -> (ExecutionTarget, Option<ket::execution::QuantumExecution>) {
-        let quantum_execution = if coupling_graph.is_none() && use_live && S::feature_allow_live() {
-            ket::execution::QuantumExecution::Live(Box::new(Self::new(num_qubits).unwrap()))
-        } else {
-            ket::execution::QuantumExecution::Batch(Box::new(Self::new(num_qubits).unwrap()))
-        };
-
-        let execution_protocol = if let Some(sample_base) = sample_base {
-            ExecutionProtocol::SampleBased(ExpValueStrategy::DirectSample(sample_base))
-        } else if let Some(classical_shadows) = classical_shadows {
-            ExecutionProtocol::SampleBased(ExpValueStrategy::ClassicalShadows {
-                bias: classical_shadows.0,
-                samples: classical_shadows.1,
-                shots: classical_shadows.2,
-            })
-        } else {
-            ExecutionProtocol::ManagedByTarget {
-                measure: S::feature_measure(),
-                sample: S::feature_sample(),
-                exp_value: S::feature_exp_value(),
-                dump: S::feature_dump(),
-            }
-        };
-
-        let execution_target = ket::execution::ExecutionTarget {
+    /// Build a [`QPUConfig`] configured for **live** (gate-by-gate) execution.
+    ///
+    /// Each gate is dispatched to the simulator immediately upon receipt;
+    /// no circuit optimisation or decomposition is performed.
+    pub fn make_live_config(num_qubits: usize) -> Result<QPUConfig, KetError>
+    where
+        S: 'static,
+    {
+        Ok(QPUConfig {
             num_qubits,
-            qpu: if S::feature_need_decomposition() || coupling_graph.is_some() {
-                Some(QPU {
-                    coupling_graph,
-                    u2_gates: U2Gates::All,
-                    u4_gate: U4Gate::CX,
-                })
-            } else {
-                None
-            },
-            execution_protocol,
-            gradient: if gradient {
-                Some(if S::supports_gradient() {
-                    Gradient::NativeSupport
-                } else {
-                    Gradient::ParameterShift
-                })
-            } else {
-                None
-            },
-        };
+            quantum_execution: Some(KetQuantumExecution::Live {
+                qpu: Box::new(Self::new(num_qubits)?),
+                decompose: false,
+            }),
+        })
+    }
 
-        (execution_target, Some(quantum_execution))
+    /// Build a [`QPUConfig`] configured for **batch** execution.
+    ///
+    /// The full circuit is assembled by the `ket` runtime before being handed
+    /// to the simulator.  An optional `coupling_graph` restricts two-qubit
+    /// connectivity, and `gradient` enables the parameter-shift rule for
+    /// gradient computation.
+    pub fn make_batch_config(
+        num_qubits: usize,
+        coupling_graph: Option<Vec<(usize, usize)>>,
+        gradient: bool,
+    ) -> Result<QPUConfig, KetError>
+    where
+        S: 'static,
+    {
+        Ok(QPUConfig {
+            num_qubits,
+            quantum_execution: Some(KetQuantumExecution::Batch {
+                qpu: Box::new(Self::new(num_qubits)?),
+                native_gate_set: None,
+                gradient: if gradient {
+                    GradientStrategy::ParameterShiftRule
+                } else {
+                    GradientStrategy::None
+                },
+                exp_value: ket::execution::ExpValueStrategy::Native,
+                coupling_graph,
+            }),
+        })
     }
 }
 
 impl<S: QuantumExecution> QubitManager<S> {
-    fn get_param(&self, param: Param) -> f64 {
-        match param {
-            Param::Value(value) => value,
-            Param::Ref {
-                index, multiplier, ..
-            } => self.parameters[index] * multiplier,
-        }
-    }
-
-    fn gate(&mut self, gate: QuantumGate, target: usize, control: &[usize]) {
+    fn apply_gate(&mut self, gate: &QuantumGate, target: usize, control: &[usize]) {
         match gate {
             QuantumGate::RotationX(theta) => {
-                self.simulator.rx(self.get_param(theta), target, control);
+                self.simulator.rx(theta.value(), target, control);
             }
             QuantumGate::RotationY(theta) => {
-                self.simulator.ry(self.get_param(theta), target, control);
+                self.simulator.ry(theta.value(), target, control);
             }
             QuantumGate::RotationZ(theta) => {
-                self.simulator.rz(self.get_param(theta), target, control);
+                self.simulator.rz(theta.value(), target, control);
             }
             QuantumGate::Phase(lambda) => {
-                self.simulator
-                    .phase(self.get_param(lambda), target, control);
+                self.simulator.phase(lambda.value(), target, control);
             }
             QuantumGate::Hadamard => self.simulator.hadamard(target, control),
             QuantumGate::PauliX => self.simulator.pauli_x(target, control),
@@ -231,180 +260,118 @@ impl<S: QuantumExecution> QubitManager<S> {
         }
     }
 
-    fn measure(&mut self, qubits: &[usize]) -> u64 {
-        let result = qubits
+    fn do_measure(&mut self, qubits: &[usize]) -> u64 {
+        qubits
             .iter()
             .rev()
             .enumerate()
             .map(|(index, qubit)| {
                 let p1 = self.simulator.measure_p1(*qubit);
-                let p0 = match 1.0 - p1 {
-                    p0 if p0 >= 0.0 => p0,
-                    _ => 0.0,
-                };
+                let p0 = (1.0 - p1).max(0.0);
                 let result = WeightedIndex::new([p0, p1]).unwrap().sample(&mut self.rng);
-                let p = 1.0 / f64::sqrt(if result == 1 { p1 } else { p0 });
+                // Guard against division by zero when one outcome has negligible
+                // probability: clamp to a small positive value before inverting.
+                let prob = if result == 1 { p1 } else { p0 };
+                let p = 1.0 / f64::sqrt(prob.max(f64::MIN_POSITIVE));
                 self.simulator.measure_collapse(*qubit, result == 1, p);
                 (result << index) as u64
             })
             .reduce(|a, b| a | b)
-            .unwrap_or(0);
-
-        result
+            .unwrap_or(0)
     }
 
-    fn exp_value(&mut self, hamiltonian: &Hamiltonian<usize>) -> f64 {
-        self.simulator.exp_value(hamiltonian)
-    }
-
-    fn sample(&mut self, qubits: &[usize], shots: usize) -> Sample {
+    fn do_sample(&mut self, qubits: &[usize], shots: usize) -> SampleData {
         assert!(!qubits.is_empty());
         self.simulator.sample(qubits, shots, &mut self.rng)
     }
 
-    fn dump(&mut self, qubits: &[usize]) -> DumpData {
+    fn do_dump(&mut self, qubits: &[usize]) -> DumpData {
         self.simulator.dump(qubits)
     }
-}
 
-impl<S: QuantumExecution> LiveExecution for QubitManager<S> {
-    fn gate(&mut self, gate: QuantumGate, target: LogicalQubit, control: &[LogicalQubit]) {
-        let control = control
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
-        self.gate(gate, target.index(), &control);
-    }
-
-    fn measure(&mut self, qubits: &[LogicalQubit]) -> u64 {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
-        self.measure(&qubits)
-    }
-
-    fn exp_value(&mut self, hamiltonian: &Hamiltonian<LogicalQubit>) -> f64 {
-        self.exp_value(&hamiltonian.to_usize_qubit())
-    }
-
-    fn sample(&mut self, qubits: &[LogicalQubit], shots: usize) -> Sample {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
-        self.sample(&qubits, shots)
-    }
-
-    fn dump(&mut self, qubits: &[LogicalQubit]) -> DumpData {
-        let qubits = qubits
-            .iter()
-            .map(ket::ir::qubit::Qubit::index)
-            .collect_vec();
-        self.dump(&qubits)
-    }
-
-    fn save(&self) -> Vec<u8> {
-        self.simulator.save()
-    }
-
-    fn load(&mut self, data: &[u8]) {
-        self.simulator.load(data);
+    fn do_exp_value(&mut self, hamiltonian: &Hamiltonian) -> f64 {
+        self.simulator.exp_value(hamiltonian)
     }
 }
 
-impl<S: QuantumExecution + ExecutionFeatures> QubitManager<S> {
-    fn submit_execution(&mut self, instructions: &[Instruction<usize>]) {
-        let pb = if std::env::var("KBW_PB")
-            .unwrap_or_default()
-            .parse::<bool>()
-            .unwrap_or(true)
-        {
-            let pb = indicatif::ProgressBar::new(instructions.len() as u64);
-            pb.set_style(
-                indicatif::ProgressStyle::with_template(
-                    "KBW: {percent_precise}% {wide_bar} Time: {elapsed}/{duration} (ETA: {eta})",
-                )
-                .unwrap(),
-            );
-            Some(pb)
-        } else {
-            None
-        };
+impl<S: QuantumExecution + 'static> LiveExecution for QubitManager<S> {
+    fn compute_gate(&mut self, gate: &GateInstruction) -> Result<(), ket::error::KetError> {
+        let control: Vec<usize> = gate.control.iter().copied().collect();
+        self.apply_gate(&gate.gate, gate.target, &control);
+        Ok(())
+    }
 
-        for instruction in instructions.iter().cloned() {
-            match instruction {
-                Instruction::Gate {
-                    gate,
-                    target,
-                    control,
-                } => self.gate(gate, target, &control),
-                Instruction::Measure { qubits, index } => {
-                    let result = self.measure(&qubits);
-                    let measurements = &mut self.results.measurements;
-                    if measurements.len() <= index {
-                        measurements.resize(index + 1, 0);
-                    }
-                    measurements[index] = result;
-                }
-                Instruction::Sample {
-                    qubits,
-                    index,
-                    shots,
-                } => {
-                    let result = self.sample(&qubits, shots);
-                    let samples = &mut self.results.samples;
-                    if samples.len() <= index {
-                        samples.resize(index + 1, Default::default());
-                    }
-                    samples[index] = result;
-                }
-                Instruction::Dump { qubits, index } => {
-                    let result = self.dump(&qubits);
-                    let dumps = &mut self.results.dumps;
-                    if dumps.len() <= index {
-                        dumps.resize(index + 1, Default::default());
-                    }
-                    dumps[index] = result;
-                }
-                Instruction::ExpValue { hamiltonian, index } => {
-                    let result = self.exp_value(&hamiltonian);
-                    let exp_values = &mut self.results.exp_values;
-                    if exp_values.len() <= index {
-                        exp_values.resize(index + 1, 0.0);
-                    }
-                    exp_values[index] = result;
-                }
-                _ => {}
-            }
-            if let Some(pb) = &pb {
-                pb.inc(1)
-            };
-        }
-        if let Some(pb) = &pb {
-            pb.finish_and_clear();
-        }
-        if S::supports_gradient() {
-            self.results.gradients = self.simulator.gradients();
-        }
+    fn measure(&mut self, qubits: &[usize]) -> Result<u64, ket::error::KetError> {
+        Ok(self.do_measure(qubits))
+    }
+
+    fn dump(&mut self, qubits: &[usize]) -> Result<DumpData, ket::error::KetError> {
+        Ok(self.do_dump(qubits))
+    }
+
+    fn sample(
+        &mut self,
+        qubits: &[usize],
+        shots: usize,
+    ) -> Result<SampleData, ket::error::KetError> {
+        Ok(self.do_sample(qubits, shots))
+    }
+
+    fn exp_value(&mut self, hamiltonian: Hamiltonian) -> Result<f64, ket::error::KetError> {
+        Ok(self.do_exp_value(&hamiltonian))
     }
 }
 
-impl<S: QuantumExecution + ExecutionFeatures> BatchExecution for QubitManager<S> {
-    fn submit_execution(&mut self, circuit: &[Instruction<usize>], parameters: &[f64]) {
-        if !parameters.is_empty() {
-            self.parameters = parameters.to_owned();
-        }
-        self.submit_execution(circuit);
-    }
-
-    fn get_results(&mut self) -> ResultData {
-        self.results.clone()
-    }
-
-    fn clear(&mut self) {
-        self.results = Default::default();
-        self.parameters.clear();
+impl<S: QuantumExecution + 'static> QubitManager<S> {
+    fn compute_gates(&mut self, gates: &[NativeGate]) -> Result<(), KetError> {
         self.simulator.clear();
+        for (name, angles, qubits) in gates {
+            let control: Vec<usize> = qubits[..qubits.len().saturating_sub(1)].to_vec();
+            let target = *qubits.last().unwrap();
+            match name.as_str() {
+                "x" => self.simulator.pauli_x(target, &[]),
+                "y" => self.simulator.pauli_y(target, &[]),
+                "z" => self.simulator.pauli_z(target, &[]),
+                "h" => self.simulator.hadamard(target, &[]),
+                "rx" => self.simulator.rx(angles[0], target, &[]),
+                "ry" => self.simulator.ry(angles[0], target, &[]),
+                "rz" => self.simulator.rz(angles[0], target, &[]),
+                "p" => self.simulator.phase(angles[0], target, &[]),
+                "cnot" => self.simulator.pauli_x(target, &control),
+                "cz" => self.simulator.pauli_z(target, &control),
+                _ => {
+                    return Err(KetError::NativeGateUnsupported);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<S: QuantumExecution + 'static> BatchExecution for QubitManager<S> {
+    fn sample(
+        &mut self,
+        gates: &[NativeGate],
+        qubits_to_sample: &[usize],
+        shots: usize,
+    ) -> Result<SampleData, ket::error::KetError> {
+        self.compute_gates(gates)?;
+        Ok(self.do_sample(qubits_to_sample, shots))
+    }
+
+    fn exp_value(
+        &mut self,
+        gates: &[NativeGate],
+        hamiltonian_list: &[Hamiltonian],
+    ) -> Result<Vec<f64>, ket::error::KetError> {
+        self.compute_gates(gates)?;
+        Ok(hamiltonian_list
+            .iter()
+            .map(|h| self.do_exp_value(h))
+            .collect())
+    }
+
+    fn exp_value_available(&self) -> bool {
+        true
     }
 }
