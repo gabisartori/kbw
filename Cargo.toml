@@ -18,7 +18,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = { path = "../libket" }
+libket = { git = "https://gitlab.com/quantum-ket/libket.git", rev = "1c91960cf3b06b1a4044d0ea23b615aa6d476335" }
 num = { version = "0.4" }
 rand = "0.10.2"
 rayon = "1.12.0"
@@ -40,7 +40,7 @@ build-info-build = "0.0.45"
 crate-type = ["cdylib", "rlib"]
 
 [profile.release]
-strip = false
-debug = true
+strip = true
+
 [features]
 swap_count = []
