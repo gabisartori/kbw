@@ -27,7 +27,7 @@
 //! | Gate cost | O(2^n) parallel | O(k) sequential |
 //! | Best for | genral case | one-hot encoding |
 
-use crate::bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec};
+use crate::bitwise::{bit_flip_vec, ctrl_check_vec, is_one_at_vec, StateKey};
 use crate::quantum_execution::QuantumExecution;
 use crate::FloatOps;
 use itertools::Itertools;
@@ -36,11 +36,11 @@ use ket::execution::DumpData;
 use num::complex::Complex;
 use num::One;
 use rayon::prelude::*;
+use rustc_hash::FxBuildHasher;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use twox_hash::xxhash64::RandomState;
 
-type StateMap<F> = HashMap<Vec<u64>, Complex<F>, RandomState>;
+type StateMap<F> = HashMap<StateKey, Complex<F>, FxBuildHasher>;
 
 /// HashMap-based sparse state-vector simulator generic over float type `F`.
 ///
@@ -86,7 +86,8 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
 
         let mut state_0 = StateMap::<F>::default();
 
-        let zero = vec![0; num_states];
+        let mut zero = StateKey::new();
+        zero.resize(num_states, 0);
 
         state_0.insert(zero, Complex::<F>::one());
 
@@ -156,7 +157,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
         current_state.drain().for_each(|(state, mut amp)| {
             if !has_control || ctrl_check_vec(&state, control) {
                 amp *= inv_sqrt_2;
-                let state_flipped = bit_flip_vec(Vec::clone(&state), target);
+                let state_flipped = bit_flip_vec(state.clone(), target);
 
                 match next_state.entry(state_flipped) {
                     Entry::Occupied(mut entry) => {
@@ -213,18 +214,18 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
         let has_control = !control.is_empty();
 
         let half_theta = F::from(theta / 2.0).unwrap();
-        let cons_theta_2 = Complex::<F>::from(F::cos(half_theta));
-        let sin_theta_2 = -Complex::<F>::i() * F::sin(half_theta);
+        let cos = F::cos(half_theta);
+        let sin = F::sin(half_theta);
 
         let epsilon = F::from(F::small_epsilon()).unwrap();
         let epsilon_sqr = epsilon * epsilon;
 
         current_state.drain().for_each(|(state, amp)| {
             if !has_control || ctrl_check_vec(&state, control) {
-                let state_flipped = bit_flip_vec(Vec::clone(&state), target);
+                let state_flipped = bit_flip_vec(state.clone(), target);
 
                 // Branch 1: Flip
-                let flip_term = amp * sin_theta_2;
+                let flip_term = Complex::new(amp.im * sin, -amp.re * sin);
                 match next_state.entry(state_flipped) {
                     Entry::Occupied(mut entry) => {
                         let c_amp = entry.get_mut();
@@ -239,7 +240,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                 }
 
                 // Branch 2: Stay
-                let stay_term = amp * cons_theta_2;
+                let stay_term = Complex::new(amp.re * cos, amp.im * cos);
                 match next_state.entry(state) {
                     Entry::Occupied(mut entry) => {
                         let c_amp = entry.get_mut();
@@ -263,50 +264,48 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
         let has_control = !control.is_empty();
 
         let half_theta = F::from(theta / 2.0).unwrap();
-        let cons_theta_2 = Complex::<F>::from(F::cos(half_theta));
-        let p_sin_theta_2 = Complex::<F>::from(F::sin(half_theta));
-        let m_sin_theta_2 = -p_sin_theta_2;
+        let cos = F::cos(half_theta);
+        let sin = F::sin(half_theta);
 
         let epsilon = F::from(F::small_epsilon()).unwrap();
         let epsilon_sqr = epsilon * epsilon;
 
         current_state.drain().for_each(|(state, amp)| {
             if !has_control || ctrl_check_vec(&state, control) {
-                let state_flipped = bit_flip_vec(Vec::clone(&state), target);
-
-                let flipped_amp = amp
-                    * if is_one_at_vec(&state, target) {
-                        m_sin_theta_2
-                    } else {
-                        p_sin_theta_2
-                    };
+                let state_flipped = bit_flip_vec(state.clone(), target);
 
                 // Branch 1: Flip
+                let sign = if is_one_at_vec(&state, target) {
+                    -F::one()
+                } else {
+                    F::one()
+                };
+                let flip_term = Complex::new(amp.re * sign * sin, amp.im * sign * sin);
                 match next_state.entry(state_flipped) {
                     Entry::Occupied(mut entry) => {
                         let c_amp = entry.get_mut();
-                        *c_amp += flipped_amp;
+                        *c_amp += flip_term;
                         if c_amp.norm_sqr() < epsilon_sqr {
                             entry.remove();
                         }
                     }
                     Entry::Vacant(entry) => {
-                        entry.insert(flipped_amp);
+                        entry.insert(flip_term);
                     }
                 }
 
                 // Branch 2: Stay
-                let stay_amp = amp * cons_theta_2;
+                let stay_term = Complex::new(amp.re * cos, amp.im * cos);
                 match next_state.entry(state) {
                     Entry::Occupied(mut entry) => {
                         let c_amp = entry.get_mut();
-                        *c_amp += stay_amp;
+                        *c_amp += stay_term;
                         if c_amp.norm_sqr() < epsilon_sqr {
                             entry.remove();
                         }
                     }
                     Entry::Vacant(entry) => {
-                        entry.insert(stay_amp);
+                        entry.insert(stay_term);
                     }
                 }
             } else {
@@ -371,7 +370,7 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
             .iter()
             .sorted_by_key(|x| x.0)
             .map(|(state, amp)| {
-                let mut state: Vec<u64> = qubits
+                let mut basis_state: Vec<u64> = qubits
                     .iter()
                     .rev()
                     .chunks(64)
@@ -387,9 +386,13 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
                             .unwrap_or(0) as u64
                     })
                     .collect();
-                state.reverse();
+                basis_state.reverse();
 
-                (state, amp.re.to_f64().unwrap(), amp.im.to_f64().unwrap())
+                (
+                    basis_state,
+                    amp.re.to_f64().unwrap(),
+                    amp.im.to_f64().unwrap(),
+                )
             })
             .multiunzip();
 
@@ -404,7 +407,8 @@ impl<F: FloatOps> QuantumExecution for Sparse<F> {
         self.state_0 = StateMap::<F>::default();
         self.state_1 = StateMap::<F>::default();
 
-        let zero = vec![0; self.num_states];
+        let mut zero = StateKey::new();
+        zero.resize(self.num_states, 0);
 
         self.state_0.insert(zero, Complex::<F>::one());
         self.state = true;

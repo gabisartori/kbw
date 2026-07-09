@@ -73,8 +73,10 @@ pub unsafe extern "C" fn kbw_make_configuration(
     };
 
     let config = match simulator.as_str() {
-        "dense" => make_config::<Dense>(num_qubits, use_live, coupling_graph, gradient),
-        "densev2" => make_config::<DenseV2>(num_qubits, use_live, coupling_graph, gradient),
+        "densev1" => make_config::<Dense>(num_qubits, use_live, coupling_graph, gradient),
+        "dense" | "densev2" => {
+            make_config::<DenseV2>(num_qubits, use_live, coupling_graph, gradient)
+        }
         "densegpu" => make_config::<DenseGPUBlock>(num_qubits, use_live, coupling_graph, gradient),
         "sparse" => make_config::<Sparse>(num_qubits, use_live, coupling_graph, gradient),
         "sparsev2" => make_config::<SparseV2>(num_qubits, use_live, coupling_graph, gradient),

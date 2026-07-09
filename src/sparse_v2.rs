@@ -31,7 +31,9 @@ use num::complex::Complex;
 use num::One;
 use rayon::prelude::*;
 
-type StateVec<F> = Vec<(Vec<u64>, Complex<F>)>;
+use crate::bitwise::StateKey;
+
+type StateVec<F> = Vec<(StateKey, Complex<F>)>;
 
 /// Vec-based sparse state-vector simulator generic over float type `F`.
 ///
@@ -87,7 +89,8 @@ impl<F: FloatOps> SparseV2<F> {
 impl<F: FloatOps> QuantumExecution for SparseV2<F> {
     fn new(num_qubits: usize) -> Result<Self, KetError> {
         let num_states = num_qubits.div_ceil(64);
-        let zero_state = vec![0; num_states];
+        let mut zero_state = StateKey::new();
+        zero_state.resize(num_states, 0);
         let states = vec![(zero_state, Complex::<F>::one())];
 
         Ok(Self { states, num_states })
@@ -182,8 +185,8 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let half_theta = F::from(theta / 2.0).unwrap();
-        let cos_t2 = Complex::<F>::from(F::cos(half_theta));
-        let sin_t2 = -Complex::<F>::i() * F::sin(half_theta);
+        let cos = F::cos(half_theta);
+        let sin = F::sin(half_theta);
 
         self.states = std::mem::take(&mut self.states)
             .into_par_iter()
@@ -191,9 +194,12 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
                 if control.is_empty() || ctrl_check_vec(&state, control) {
                     let state_flipped = bit_flip_vec(state.clone(), target);
 
+                    let flip_amp = Complex::new(amp.im * sin, -amp.re * sin);
+                    let stay_amp = Complex::new(amp.re * cos, amp.im * cos);
+
                     itertools::Either::Left(
-                        std::iter::once((state_flipped, amp * sin_t2))
-                            .chain(std::iter::once((state, amp * cos_t2))),
+                        std::iter::once((state_flipped, flip_amp))
+                            .chain(std::iter::once((state, stay_amp))),
                     )
                 } else {
                     itertools::Either::Right(std::iter::once((state, amp)))
@@ -206,8 +212,8 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
         let half_theta = F::from(theta / 2.0).unwrap();
-        let cos_t2 = Complex::<F>::from(F::cos(half_theta));
-        let sin_t2 = Complex::<F>::from(F::sin(half_theta));
+        let cos = F::cos(half_theta);
+        let sin = F::sin(half_theta);
 
         self.states = std::mem::take(&mut self.states)
             .into_par_iter()
@@ -215,15 +221,18 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
                 if control.is_empty() || ctrl_check_vec(&state, control) {
                     let state_flipped = bit_flip_vec(state.clone(), target);
 
-                    let flip_amp = if is_one_at_vec(&state, target) {
-                        -sin_t2
+                    let sign = if is_one_at_vec(&state, target) {
+                        -F::one()
                     } else {
-                        sin_t2
+                        F::one()
                     };
 
+                    let flip_amp = Complex::new(amp.re * sign * sin, amp.im * sign * sin);
+                    let stay_amp = Complex::new(amp.re * cos, amp.im * cos);
+
                     itertools::Either::Left(
-                        std::iter::once((state_flipped, amp * flip_amp))
-                            .chain(std::iter::once((state, amp * cos_t2))),
+                        std::iter::once((state_flipped, flip_amp))
+                            .chain(std::iter::once((state, stay_amp))),
                     )
                 } else {
                     itertools::Either::Right(std::iter::once((state, amp)))
@@ -318,7 +327,8 @@ impl<F: FloatOps> QuantumExecution for SparseV2<F> {
     }
 
     fn clear(&mut self) {
-        let zero_state = vec![0; self.num_states];
+        let mut zero_state = StateKey::new();
+        zero_state.resize(self.num_states, 0);
         self.states = vec![(zero_state, Complex::<F>::one())];
     }
 }

@@ -37,11 +37,15 @@ pub(crate) const fn bit_flip(state: usize, index: usize) -> usize {
     state ^ (1 << index)
 }
 
-/// Flip bit `index` in `state` (packed `Vec<u64>`, sparse representation).
+use smallvec::SmallVec;
+
+pub type StateKey = SmallVec<[u64; 2]>;
+
+/// Flip bit `index` in `state` (packed `StateKey`, sparse representation).
 ///
 /// `index` is the global qubit index; it is decomposed into an outer word
 /// index and an inner bit index automatically.
-pub(crate) fn bit_flip_vec(mut state: Vec<u64>, index: usize) -> Vec<u64> {
+pub(crate) fn bit_flip_vec(mut state: StateKey, index: usize) -> StateKey {
     let (outer_index, inner_index) = index.div_mod_floor(&64);
     state[outer_index] = bit_flip(usize::try_from(state[outer_index]).unwrap(), inner_index) as u64;
     state
