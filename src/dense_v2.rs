@@ -52,24 +52,96 @@ impl<F: FloatOps> DenseV2<F> {
         let full_block_size = half_block_size << 1;
         let ctrl_mask: usize = get_ctrl_mask(control);
 
+        let ctrl_mask_low = ctrl_mask & (half_block_size - 1);
+        let ctrl_mask_high = ctrl_mask & !(full_block_size - 1);
+
         let inner_gate =
-            |chunk_id: usize, (upper, lower): (&mut [Complex<F>], &mut [Complex<F>])| {
-                upper
-                    .par_iter_mut()
-                    .zip(lower.par_iter_mut())
-                    .enumerate()
-                    .for_each(|(index, op)| {
-                        if ((chunk_id * full_block_size + index) & ctrl_mask) == ctrl_mask {
-                            gate_impl(op);
-                        }
-                    });
+            |(upper, lower): (&mut [Complex<F>], &mut [Complex<F>])| {
+                if ctrl_mask_low == 0 {
+                    if upper.len() < 2048 {
+                        upper.iter_mut().zip(lower.iter_mut()).for_each(&gate_impl);
+                    } else {
+                        upper
+                            .par_iter_mut()
+                            .zip(lower.par_iter_mut())
+                            .for_each(&gate_impl);
+                    }
+                } else {
+                    if upper.len() < 2048 {
+                        upper.iter_mut().zip(lower.iter_mut()).enumerate().for_each(
+                            |(index, op)| {
+                                if (index & ctrl_mask_low) == ctrl_mask_low {
+                                    gate_impl(op);
+                                }
+                            },
+                        );
+                    } else {
+                        upper
+                            .par_iter_mut()
+                            .zip(lower.par_iter_mut())
+                            .enumerate()
+                            .for_each(|(index, op)| {
+                                if (index & ctrl_mask_low) == ctrl_mask_low {
+                                    gate_impl(op);
+                                }
+                            });
+                    }
+                }
             };
 
         self.0
             .par_chunks_mut(full_block_size)
             .enumerate()
             .for_each(|(chunk_id, state)| {
-                inner_gate(chunk_id, state.split_at_mut(half_block_size));
+                if ((chunk_id * full_block_size) & ctrl_mask_high) == ctrl_mask_high {
+                    inner_gate(state.split_at_mut(half_block_size));
+                }
+            });
+    }
+
+    fn diagonal_gate<G>(&mut self, gate_impl: G, target: usize, control: &[usize])
+    where
+        G: Fn(&mut Complex<F>) + std::marker::Sync,
+    {
+        let half_block_size = 1 << target;
+        let full_block_size = half_block_size << 1;
+        let ctrl_mask: usize = get_ctrl_mask(control);
+
+        let ctrl_mask_low = ctrl_mask & (half_block_size - 1);
+        let ctrl_mask_high = ctrl_mask & !(full_block_size - 1);
+
+        let inner_gate = |lower: &mut [Complex<F>]| {
+            if ctrl_mask_low == 0 {
+                if lower.len() < 2048 {
+                    lower.iter_mut().for_each(&gate_impl);
+                } else {
+                    lower.par_iter_mut().for_each(&gate_impl);
+                }
+            } else {
+                if lower.len() < 2048 {
+                    lower.iter_mut().enumerate().for_each(|(index, op)| {
+                        if (index & ctrl_mask_low) == ctrl_mask_low {
+                            gate_impl(op);
+                        }
+                    });
+                } else {
+                    lower.par_iter_mut().enumerate().for_each(|(index, op)| {
+                        if (index & ctrl_mask_low) == ctrl_mask_low {
+                            gate_impl(op);
+                        }
+                    });
+                }
+            }
+        };
+
+        self.0
+            .par_chunks_mut(full_block_size)
+            .enumerate()
+            .for_each(|(chunk_id, state)| {
+                if ((chunk_id * full_block_size) & ctrl_mask_high) == ctrl_mask_high {
+                    let (_, lower) = state.split_at_mut(half_block_size);
+                    inner_gate(lower);
+                }
             });
     }
 }
@@ -113,8 +185,8 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     }
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
-        self.gate(
-            |(_ket0, ket1)| {
+        self.diagonal_gate(
+            |ket1| {
                 *ket1 *= -Complex::<F>::one();
             },
             target,
@@ -138,8 +210,8 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
         let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
 
-        self.gate(
-            |(_ket0, ket1): (&mut Complex<F>, &mut Complex<F>)| {
+        self.diagonal_gate(
+            |ket1: &mut Complex<F>| {
                 *ket1 *= phase;
             },
             target,
@@ -148,15 +220,20 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     }
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
+        let cos = F::cos(F::from(theta / 2.0).unwrap());
+        let sin = F::sin(F::from(theta / 2.0).unwrap());
 
         self.gate(
             |(ket0, ket1)| {
-                let tmp_ket0 = *ket0;
-                let tmp_ket1 = *ket1;
-                *ket0 = cons_theta_2 * tmp_ket0 + sin_theta_2 * tmp_ket1;
-                *ket1 = sin_theta_2 * tmp_ket0 + cons_theta_2 * tmp_ket1;
+                let r0 = ket0.re;
+                let i0 = ket0.im;
+                let r1 = ket1.re;
+                let i1 = ket1.im;
+
+                ket0.re = cos * r0 + sin * i1;
+                ket0.im = cos * i0 - sin * r1;
+                ket1.re = sin * i0 + cos * r1;
+                ket1.im = -sin * r0 + cos * i1;
             },
             target,
             control,
@@ -164,16 +241,20 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
-        let m_sin_theta_2 = -p_sin_theta_2;
+        let cos = F::cos(F::from(theta / 2.0).unwrap());
+        let sin = F::sin(F::from(theta / 2.0).unwrap());
 
         self.gate(
             |(ket0, ket1)| {
-                let tmp_ket0 = *ket0;
-                let tmp_ket1 = *ket1;
-                *ket0 = cons_theta_2 * tmp_ket0 + m_sin_theta_2 * tmp_ket1;
-                *ket1 = p_sin_theta_2 * tmp_ket0 + cons_theta_2 * tmp_ket1;
+                let r0 = ket0.re;
+                let i0 = ket0.im;
+                let r1 = ket1.re;
+                let i1 = ket1.im;
+
+                ket0.re = cos * r0 - sin * r1;
+                ket0.im = cos * i0 - sin * i1;
+                ket1.re = sin * r0 + cos * r1;
+                ket1.im = sin * i0 + cos * i1;
             },
             target,
             control,

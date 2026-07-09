@@ -93,16 +93,25 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
 
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                *amp = current_state[if (state & ctrl_mask) == ctrl_mask {
-                    bit_flip(state, target)
-                } else {
-                    state
-                }];
-            });
+        if ctrl_mask == 0 {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, amp)| {
+                    *amp = current_state[bit_flip(state, target)];
+                });
+        } else {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, amp)| {
+                    *amp = current_state[if (state & ctrl_mask) == ctrl_mask {
+                        bit_flip(state, target)
+                    } else {
+                        state
+                    }];
+                });
+        }
     }
 
     fn pauli_y(&mut self, target: usize, control: &[usize]) {
@@ -110,36 +119,51 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
 
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
+        if ctrl_mask == 0 {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, amp)| {
                     *amp = current_state[bit_flip(state, target)]
                         * if is_one_at(state, target) {
                             Complex::<F>::i()
                         } else {
                             -Complex::<F>::i()
                         };
-                } else {
-                    *amp = current_state[state];
-                }
-            });
+                });
+        } else {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, amp)| {
+                    if (state & ctrl_mask) == ctrl_mask {
+                        *amp = current_state[bit_flip(state, target)]
+                            * if is_one_at(state, target) {
+                                Complex::<F>::i()
+                            } else {
+                                -Complex::<F>::i()
+                            };
+                    } else {
+                        *amp = current_state[state];
+                    }
+                });
+        }
     }
 
     fn pauli_z(&mut self, target: usize, control: &[usize]) {
-        let (current_state, next_state) = self.get_states();
-
+        let current_state = if self.state {
+            &mut self.state_0
+        } else {
+            &mut self.state_1
+        };
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
+        current_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
                 if (state & ctrl_mask) == ctrl_mask && is_one_at(state, target) {
-                    *amp = -current_state[state];
-                } else {
-                    *amp = current_state[state];
+                    *amp = -*amp;
                 }
             });
     }
@@ -149,53 +173,57 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
 
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp = current_state[bit_flip(state, target)] * F::FRAC_1_SQRT_2();
-                } else {
-                    *amp = Complex::<F>::zero();
-                }
-            });
+        if ctrl_mask == 0 {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    let sign = if is_one_at(state, target) {
+                        -F::one()
+                    } else {
+                        F::one()
+                    };
+                    *next_amp = (current_state[state] * sign
+                        + current_state[bit_flip(state, target)])
+                        * F::FRAC_1_SQRT_2();
+                });
+        } else {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    if (state & ctrl_mask) == ctrl_mask {
+                        let sign = if is_one_at(state, target) {
+                            -F::one()
+                        } else {
+                            F::one()
+                        };
+                        *next_amp = (current_state[state] * sign
+                            + current_state[bit_flip(state, target)])
+                            * F::FRAC_1_SQRT_2();
+                    } else {
+                        *next_amp = current_state[state];
+                    }
+                });
+        }
+    }
+
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
+        let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
+        let current_state = if self.state {
+            &mut self.state_0
+        } else {
+            &mut self.state_1
+        };
+
+        let ctrl_mask: usize = get_ctrl_mask(control);
 
         current_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp *= if is_one_at(state, target) {
-                        -F::FRAC_1_SQRT_2()
-                    } else {
-                        F::FRAC_1_SQRT_2()
-                    };
-                }
-            });
-
-        next_state
-            .par_iter_mut()
-            .zip(current_state.par_iter())
-            .for_each(|(next_amp, current_amp)| {
-                *next_amp += *current_amp;
-            });
-    }
-
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        let (current_state, next_state) = self.get_states();
-
-        let phase = Complex::<F>::exp(Complex::<F>::i() * F::from(lambda).unwrap());
-
-        let ctrl_mask: usize = get_ctrl_mask(control);
-
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
                 if (state & ctrl_mask) == ctrl_mask && is_one_at(state, target) {
-                    *amp = current_state[state] * phase;
-                } else {
-                    *amp = current_state[state];
+                    *amp *= phase;
                 }
             });
     }
@@ -203,102 +231,104 @@ impl<F: FloatOps> QuantumExecution for Dense<F> {
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let sin_theta_2 = -Complex::<F>::i() * F::sin(F::from(theta / 2.0).unwrap());
+        let cos = F::cos(F::from(theta / 2.0).unwrap());
+        let sin = F::sin(F::from(theta / 2.0).unwrap());
 
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp = current_state[bit_flip(state, target)] * sin_theta_2;
-                } else {
-                    *amp = Complex::<F>::zero();
-                }
-            });
-
-        current_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp *= cons_theta_2;
-                }
-            });
-
-        next_state
-            .par_iter_mut()
-            .zip(current_state.par_iter())
-            .for_each(|(next_amp, current_amp)| {
-                *next_amp += *current_amp;
-            });
+        if ctrl_mask == 0 {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    let cur = current_state[state];
+                    let flip = current_state[bit_flip(state, target)];
+                    next_amp.re = cos * cur.re + sin * flip.im;
+                    next_amp.im = cos * cur.im - sin * flip.re;
+                });
+        } else {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    if (state & ctrl_mask) == ctrl_mask {
+                        let cur = current_state[state];
+                        let flip = current_state[bit_flip(state, target)];
+                        next_amp.re = cos * cur.re + sin * flip.im;
+                        next_amp.im = cos * cur.im - sin * flip.re;
+                    } else {
+                        *next_amp = current_state[state];
+                    }
+                });
+        }
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
         let (current_state, next_state) = self.get_states();
 
-        let cons_theta_2 = Complex::<F>::from(F::cos(F::from(theta / 2.0).unwrap()));
-        let p_sin_theta_2 = Complex::<F>::from(F::sin(F::from(theta / 2.0).unwrap()));
-        let m_sin_theta_2 = -p_sin_theta_2;
+        let cos = F::cos(F::from(theta / 2.0).unwrap());
+        let sin = F::sin(F::from(theta / 2.0).unwrap());
 
         let ctrl_mask: usize = get_ctrl_mask(control);
 
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp = current_state[bit_flip(state, target)]
-                        * if is_one_at(state, target) {
-                            p_sin_theta_2
+        if ctrl_mask == 0 {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    let cur = current_state[state];
+                    let flip = current_state[bit_flip(state, target)];
+                    let sign = if is_one_at(state, target) {
+                        F::one()
+                    } else {
+                        -F::one()
+                    };
+                    next_amp.re = cos * cur.re + sign * sin * flip.re;
+                    next_amp.im = cos * cur.im + sign * sin * flip.im;
+                });
+        } else {
+            next_state
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(state, next_amp)| {
+                    if (state & ctrl_mask) == ctrl_mask {
+                        let cur = current_state[state];
+                        let flip = current_state[bit_flip(state, target)];
+                        let sign = if is_one_at(state, target) {
+                            F::one()
                         } else {
-                            m_sin_theta_2
+                            -F::one()
                         };
-                } else {
-                    *amp = Complex::<F>::zero();
-                }
-            });
+                        next_amp.re = cos * cur.re + sign * sin * flip.re;
+                        next_amp.im = cos * cur.im + sign * sin * flip.im;
+                    } else {
+                        *next_amp = current_state[state];
+                    }
+                });
+        }
+    }
+
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
+        let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
+        let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
+
+        let current_state = if self.state {
+            &mut self.state_0
+        } else {
+            &mut self.state_1
+        };
+        let ctrl_mask: usize = get_ctrl_mask(control);
 
         current_state
             .par_iter_mut()
             .enumerate()
             .for_each(|(state, amp)| {
                 if (state & ctrl_mask) == ctrl_mask {
-                    *amp *= cons_theta_2;
-                }
-            });
-
-        next_state
-            .par_iter_mut()
-            .zip(current_state.par_iter())
-            .for_each(|(next_amp, current_amp)| {
-                *next_amp += *current_amp;
-            });
-    }
-
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        let (current_state, next_state) = self.get_states();
-
-        let phase_0 = Complex::<F>::exp(Complex::<F>::i() * F::from(-theta / 2.0).unwrap());
-        let phase_1 = Complex::<F>::exp(Complex::<F>::i() * F::from(theta / 2.0).unwrap());
-
-        let ctrl_mask: usize = get_ctrl_mask(control);
-
-        next_state
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(state, amp)| {
-                if (state & ctrl_mask) == ctrl_mask {
-                    *amp = current_state[state]
-                        * if is_one_at(state, target) {
-                            phase_1
-                        } else {
-                            phase_0
-                        };
-                } else {
-                    *amp = current_state[state];
+                    *amp *= if is_one_at(state, target) {
+                        phase_1
+                    } else {
+                        phase_0
+                    };
                 }
             });
     }

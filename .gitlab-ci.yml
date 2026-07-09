@@ -9,7 +9,7 @@ stages:
   - deploy
 
 cargo-clippy:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.97
   stage: lint
   script:
     - cargo clippy --all-features -- -D warnings
@@ -21,13 +21,13 @@ reuse:
     - uvx reuse[charset-normalizer] lint
 
 cargo-test:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.97
   stage: test
   script:
     - cargo test --all-features
 
 linux-build:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.96.1
+  image: registry.gitlab.com/quantum-ket/ket-building-images:linux-1.97
   stage: build
   script:
     - cargo build --release
@@ -36,7 +36,7 @@ linux-build:
       - target/release/libkbw.so
 
 windows-build:
-  image: registry.gitlab.com/quantum-ket/ket-building-images:windows-1.96.1
+  image: registry.gitlab.com/quantum-ket/ket-building-images:windows-1.97
   stage: build
   script:
     - cargo build --release --target x86_64-pc-windows-gnu

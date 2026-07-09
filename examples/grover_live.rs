@@ -12,7 +12,7 @@ use ket::{
 };
 
 fn main() -> Result<(), KetError> {
-    let num_qubits = 10;
+    let num_qubits = 16;
     let simulator = kbw::DenseSimulator::make_live_config(num_qubits)?;
 
     let mut process = Process::new(simulator);
@@ -29,6 +29,8 @@ fn main() -> Result<(), KetError> {
     process.append_block(quantum_code)?;
 
     let steps = ((FRAC_PI_4) * f64::sqrt((1 << num_qubits) as f64)) as i64;
+
+    let start = std::time::Instant::now();
 
     for _ in 0..steps {
         process.append_block(controlled_gate(
@@ -53,8 +55,9 @@ fn main() -> Result<(), KetError> {
     }
 
     let result = process.measure(&qubits)?;
-
-    println!("Result={result}");
+    let duration = start.elapsed();
+    println!("Execution Time: {:?}", duration);
+    println!("Result={}", result);
 
     Ok(())
 }
