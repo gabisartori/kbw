@@ -170,7 +170,8 @@ pub trait QuantumExecution {
 /// sampling) are reproducible when a seed is set.
 pub struct QubitManager<S: QuantumExecution> {
     simulator: S,
-    rng: StdRng,
+    rng: std::sync::Mutex<StdRng>,
+    num_qubits: usize,
 }
 
 impl<S: QuantumExecution> QubitManager<S> {
@@ -186,7 +187,8 @@ impl<S: QuantumExecution> QubitManager<S> {
 
         Ok(Self {
             simulator: S::new(num_qubits)?,
-            rng: StdRng::seed_from_u64(seed),
+            rng: std::sync::Mutex::new(StdRng::seed_from_u64(seed)),
+            num_qubits,
         })
     }
 
@@ -194,7 +196,7 @@ impl<S: QuantumExecution> QubitManager<S> {
     ///
     /// Each gate is dispatched to the simulator immediately upon receipt;
     /// no circuit optimisation or decomposition is performed.
-    pub fn make_live_config(num_qubits: usize) -> Result<QPUConfig, KetError>
+    pub fn make_live_config(num_qubits: usize, decompose: bool) -> Result<QPUConfig, KetError>
     where
         S: 'static,
     {
@@ -202,7 +204,8 @@ impl<S: QuantumExecution> QubitManager<S> {
             num_qubits,
             quantum_execution: Some(KetQuantumExecution::Live {
                 qpu: Box::new(Self::new(num_qubits)?),
-                decompose: false,
+                decompose,
+                native_gate_set: if decompose { Some(Box::new(())) } else { None },
             }),
         })
     }
@@ -215,6 +218,7 @@ impl<S: QuantumExecution> QubitManager<S> {
     /// gradient computation.
     pub fn make_batch_config(
         num_qubits: usize,
+        decompose: bool,
         coupling_graph: Option<Vec<(usize, usize)>>,
         gradient: bool,
     ) -> Result<QPUConfig, KetError>
@@ -225,7 +229,11 @@ impl<S: QuantumExecution> QubitManager<S> {
             num_qubits,
             quantum_execution: Some(KetQuantumExecution::Batch {
                 qpu: Box::new(Self::new(num_qubits)?),
-                native_gate_set: None,
+                native_gate_set: if coupling_graph.is_some() {
+                    Some(Box::new(()))
+                } else {
+                    None
+                },
                 gradient: if gradient {
                     GradientStrategy::ParameterShiftRule
                 } else {
@@ -233,6 +241,7 @@ impl<S: QuantumExecution> QubitManager<S> {
                 },
                 exp_value: ket::execution::ExpValueStrategy::Native,
                 coupling_graph,
+                decompose,
             }),
         })
     }
@@ -268,7 +277,9 @@ impl<S: QuantumExecution> QubitManager<S> {
             .map(|(index, qubit)| {
                 let p1 = self.simulator.measure_p1(*qubit);
                 let p0 = (1.0 - p1).max(0.0);
-                let result = WeightedIndex::new([p0, p1]).unwrap().sample(&mut self.rng);
+                let result = WeightedIndex::new([p0, p1])
+                    .unwrap()
+                    .sample(&mut *self.rng.lock().unwrap());
                 // Guard against division by zero when one outcome has negligible
                 // probability: clamp to a small positive value before inverting.
                 let prob = if result == 1 { p1 } else { p0 };
@@ -282,7 +293,8 @@ impl<S: QuantumExecution> QubitManager<S> {
 
     fn do_sample(&mut self, qubits: &[usize], shots: usize) -> SampleData {
         assert!(!qubits.is_empty());
-        self.simulator.sample(qubits, shots, &mut self.rng)
+        self.simulator
+            .sample(qubits, shots, &mut *self.rng.lock().unwrap())
     }
 
     fn do_dump(&mut self, qubits: &[usize]) -> DumpData {
@@ -299,6 +311,10 @@ impl<S: QuantumExecution + 'static> LiveExecution for QubitManager<S> {
         let control: Vec<usize> = gate.control.iter().copied().collect();
         self.apply_gate(&gate.gate, gate.target, &control);
         Ok(())
+    }
+
+    fn compute_native_gates(&mut self, gates: &[NativeGate]) -> Result<(), ket::error::KetError> {
+        self.compute_gates(gates)
     }
 
     fn measure(&mut self, qubits: &[usize]) -> Result<u64, ket::error::KetError> {
@@ -350,28 +366,63 @@ impl<S: QuantumExecution + 'static> QubitManager<S> {
 
 impl<S: QuantumExecution + 'static> BatchExecution for QubitManager<S> {
     fn sample(
-        &mut self,
+        &self,
+        gates: &[GateInstruction],
+        qubits_to_sample: &[usize],
+        shots: usize,
+    ) -> Result<SampleData, ket::error::KetError> {
+        let mut sim = Self::new(self.num_qubits)?;
+        for gate in gates {
+            sim.compute_gate(gate)?;
+        }
+        Ok(sim.do_sample(qubits_to_sample, shots))
+    }
+
+    fn sample_native(
+        &self,
         gates: &[NativeGate],
         qubits_to_sample: &[usize],
         shots: usize,
     ) -> Result<SampleData, ket::error::KetError> {
-        self.compute_gates(gates)?;
-        Ok(self.do_sample(qubits_to_sample, shots))
+        let mut sim = Self::new(self.num_qubits)?;
+        sim.compute_gates(gates)?;
+        Ok(sim.do_sample(qubits_to_sample, shots))
     }
 
     fn exp_value(
-        &mut self,
-        gates: &[NativeGate],
+        &self,
+        gates: &[GateInstruction],
         hamiltonian_list: &[Hamiltonian],
     ) -> Result<Vec<f64>, ket::error::KetError> {
-        self.compute_gates(gates)?;
+        let mut sim = Self::new(self.num_qubits)?;
+        for gate in gates {
+            sim.compute_gate(gate)?;
+        }
         Ok(hamiltonian_list
             .iter()
-            .map(|h| self.do_exp_value(h))
+            .map(|h| sim.do_exp_value(h))
             .collect())
     }
 
-    fn exp_value_available(&self) -> bool {
-        true
+    fn exp_value_native(
+        &self,
+        gates: &[NativeGate],
+        hamiltonian_list: &[Hamiltonian],
+    ) -> Result<Vec<f64>, ket::error::KetError> {
+        let mut sim = Self::new(self.num_qubits)?;
+        sim.compute_gates(gates)?;
+        Ok(hamiltonian_list
+            .iter()
+            .map(|h| sim.do_exp_value(h))
+            .collect())
+    }
+
+    fn gradient(
+        &self,
+        _gates: &[GateInstruction],
+        _hamiltonian: &Hamiltonian,
+        _parameters: &[f64],
+    ) -> Result<(f64, Vec<f64>), KetError> {
+        Err(KetError::NativeGateUnsupported) // KBW does not support native gradient
     }
 }

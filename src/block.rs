@@ -96,8 +96,6 @@ pub struct Block<G, S: QuantumExecution + BlockSimulator<S, G>> {
     qubit_last_access: Vec<u64>,
     access_counter: u64,
     gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
-    #[cfg(feature = "swap_count")]
-    swap_count: usize,
 }
 
 impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
@@ -142,10 +140,6 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
                 global_qubit,
                 local_qubit,
             );
-            #[cfg(feature = "swap_count")]
-            {
-                self.swap_count += 1;
-            }
 
             let old_logical_qubit = *self.logical_to_physical.get_by_right(&local_qubit).unwrap();
 
@@ -216,15 +210,6 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
     }
 }
 
-#[cfg(feature = "swap_count")]
-impl<G, S: QuantumExecution + BlockSimulator<S, G>> Drop for Block<G, S> {
-    fn drop(&mut self) {
-        unsafe {
-            std::env::set_var("KBW_BLOCK_SWAP_COUNT", format!("{}", self.swap_count));
-        }
-    }
-}
-
 impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G, S> {
     fn new(num_qubits: usize) -> Result<Self, KetError>
     where
@@ -266,8 +251,6 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
             qubit_last_access,
             access_counter: 0,
             gate_queue: Vec::new(),
-            #[cfg(feature = "swap_count")]
-            swap_count: 0,
         })
     }
 

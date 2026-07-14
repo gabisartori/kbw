@@ -13,7 +13,7 @@ use ket::{
 
 fn main() -> Result<(), KetError> {
     let num_qubits = 16;
-    let simulator = kbw::DenseV2Simulator::make_live_config(num_qubits)?;
+    let simulator = kbw::DenseV2Simulator::make_live_config(num_qubits, false)?;
 
     let mut process = Process::new(simulator);
 

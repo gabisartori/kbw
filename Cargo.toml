@@ -18,7 +18,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = { git = "https://gitlab.com/quantum-ket/libket.git", rev = "1c91960cf3b06b1a4044d0ea23b615aa6d476335" }
+libket = { path = "../libket" }
 num = { version = "0.4" }
 rand = "0.10.2"
 rayon = "1.12.0"
@@ -30,7 +30,7 @@ serde_json = "1.0.150"
 num-traits = "0.2"
 cubecl = { version = "0.10.0", features = ["wgpu"] }
 bimap = "0.6.3"
-pollster = "0.4.0"
+pollster = "1.0.1"
 smallvec = "1.15.2"
 rustc-hash = "2.1.3"
 
@@ -44,4 +44,3 @@ crate-type = ["cdylib", "rlib"]
 strip = true
 
 [features]
-swap_count = []

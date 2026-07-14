@@ -17,7 +17,7 @@
 
 use std::ffi::{c_char, CStr};
 
-use crate::{Dense, DenseGPUBlock, DenseV2, Sparse, SparseV2};
+use crate::{Dense, DenseGPU, DenseGPUBlock, DenseV2, Sparse, SparseV2};
 use ket::{error::KetError, process::QPUConfig};
 
 use crate::quantum_execution::QubitManager;
@@ -54,6 +54,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
     num_qubits: usize,
     simulator: *const c_char,
     use_live: bool,
+    decompose: bool,
     gradient: bool,
     coupling_graph_json: *const c_char,
     qpu_config: &mut *mut QPUConfig,
@@ -73,13 +74,36 @@ pub unsafe extern "C" fn kbw_make_configuration(
     };
 
     let config = match simulator.as_str() {
-        "densev1" => make_config::<Dense>(num_qubits, use_live, coupling_graph, gradient),
-        "dense" | "densev2" => {
-            make_config::<DenseV2>(num_qubits, use_live, coupling_graph, gradient)
+        "densev1" => {
+            make_config::<Dense>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }
-        "densegpu" => make_config::<DenseGPUBlock>(num_qubits, use_live, coupling_graph, gradient),
-        "sparse" => make_config::<Sparse>(num_qubits, use_live, coupling_graph, gradient),
-        "sparsev2" => make_config::<SparseV2>(num_qubits, use_live, coupling_graph, gradient),
+        "dense" | "densev2" => {
+            make_config::<DenseV2>(num_qubits, use_live, decompose, coupling_graph, gradient)
+        }
+        "densegpu" => {
+            if num_qubits
+                < std::env::var("KBW_BLOCK_SIZE")
+                    .unwrap_or_default()
+                    .parse::<usize>()
+                    .unwrap_or(20)
+            {
+                make_config::<DenseGPU>(num_qubits, use_live, decompose, coupling_graph, gradient)
+            } else {
+                make_config::<DenseGPUBlock>(
+                    num_qubits,
+                    use_live,
+                    decompose,
+                    coupling_graph,
+                    gradient,
+                )
+            }
+        }
+        "sparse" => {
+            make_config::<Sparse>(num_qubits, use_live, decompose, coupling_graph, gradient)
+        }
+        "sparsev2" => {
+            make_config::<SparseV2>(num_qubits, use_live, decompose, coupling_graph, gradient)
+        }
         _ => Err(KetError::ExecutionFailed),
     };
 
@@ -95,6 +119,7 @@ pub unsafe extern "C" fn kbw_make_configuration(
 fn make_config<S>(
     num_qubits: usize,
     use_live: bool,
+    decompose: bool,
     coupling_graph: Option<Vec<(usize, usize)>>,
     gradient: bool,
 ) -> Result<QPUConfig, KetError>
@@ -103,9 +128,9 @@ where
     QubitManager<S>: ket::execution::LiveExecution + ket::execution::BatchExecution,
 {
     if coupling_graph.is_none() && use_live {
-        QubitManager::<S>::make_live_config(num_qubits)
+        QubitManager::<S>::make_live_config(num_qubits, decompose)
     } else {
-        QubitManager::<S>::make_batch_config(num_qubits, coupling_graph, gradient)
+        QubitManager::<S>::make_batch_config(num_qubits, decompose, coupling_graph, gradient)
     }
 }
 
