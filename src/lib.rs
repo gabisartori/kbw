@@ -18,7 +18,7 @@
 //! | [`DenseV2Simulator`] | Full state-vector (in-place), single process |
 //! | [`DenseV2BlockSimulator`] | Blocked state-vector for >local-memory qubit counts |
 //! | [`DenseGPUSimulator`] | GPU-accelerated full state-vector via [CubeCL](https://github.com/tracel-ai/cubecl) |
-//! | [`DenseGPUSBlockSimulator`] | Blocked GPU state-vector for large circuits |
+//! | [`DenseGPUBlockSimulator`] | Blocked GPU state-vector for large circuits |
 //! | [`SparseSimulator`] | Sparse (HashMap-based) state-vector, single process |
 //! | [`SparseV2Simulator`] | Sparse (Vec-based, cache-friendly) state-vector |
 //!
@@ -40,12 +40,6 @@
 //! A C-compatible ABI is exposed by [`c_api`] for embedding KBW in Python
 //! extensions or other FFI consumers. The entry point is
 //! [`c_api::kbw_make_configuration`].
-//!
-//! ## Feature Flags
-//!
-//! | Feature | Effect |
-//! |---|---|
-//! | `swap_count` | Tracks the number of qubit-swaps performed by the block simulator and writes the count to `KBW_BLOCK_SWAP_COUNT` on drop. Useful for performance analysis. |
 //!
 //! ## Environment Variables
 //!
