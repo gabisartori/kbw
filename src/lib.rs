@@ -63,7 +63,7 @@
 //! fn main() -> Result<(), KetError> {
 //!     let num_qubits = 10;
 //!     // Build a live-mode configuration for 10 qubits using the dense backend.
-//!     let config = DenseSimulator::make_live_config(num_qubits)?;
+//!     let config = DenseSimulator::make_live_config(num_qubits, false)?;
 //!     // Pass `config` to `ket::process::Process::new` to run a quantum program.
 //!     Ok(())
 //! }
