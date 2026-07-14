@@ -18,7 +18,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libket = { path = "../libket" }
+libket = { git = "https://gitlab.com/quantum-ket/libket.git", rev = "d862c623682bf4ac32c8561ef6e2855da3cb4f95" }
 num = { version = "0.4" }
 rand = "0.10.2"
 rayon = "1.12.0"

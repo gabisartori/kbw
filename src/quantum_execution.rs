@@ -421,7 +421,6 @@ impl<S: QuantumExecution + 'static> BatchExecution for QubitManager<S> {
         &self,
         _gates: &[GateInstruction],
         _hamiltonian: &Hamiltonian,
-        _parameters: &[f64],
     ) -> Result<(f64, Vec<f64>), KetError> {
         Err(KetError::NativeGateUnsupported) // KBW does not support native gradient
     }
