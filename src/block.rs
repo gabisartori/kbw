@@ -20,6 +20,7 @@
 
 use bimap::BiMap;
 use ket::{error::KetError, execution::DumpData};
+use smallvec::{smallvec, SmallVec};
 
 use crate::quantum_execution::QuantumExecution;
 
@@ -95,7 +96,8 @@ pub struct Block<G, S: QuantumExecution + BlockSimulator<S, G>> {
     /// LRU timestamp per local physical qubit; updated on each gate access.
     qubit_last_access: Vec<u64>,
     access_counter: u64,
-    gate_queue: Vec<(Gate, usize, Vec<usize>, Vec<bool>)>,
+    #[allow(clippy::type_complexity)]
+    gate_queue: Vec<(Gate, usize, SmallVec<[usize; 32]>, SmallVec<[bool; 16]>)>,
 }
 
 impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
@@ -147,22 +149,18 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
             self.logical_to_physical
                 .insert(old_logical_qubit, physical_qubit);
 
-            // #[cfg(debug_assertions)]
-            // {
-            //     println!(
-            //         "\x1b[1;95mlogical <> physical {:?}\x1b[0m",
-            //         self.logical_to_physical
-            //     );
-            // }
             self.touch(local_qubit);
 
             local_qubit
         }
     }
 
-    fn get_control_local_qubit(&self, control: &[usize]) -> (Vec<usize>, Vec<bool>) {
-        let mut new_control = Vec::new();
-        let mut execute = vec![true; self.simulators.len()];
+    fn get_control_local_qubit(
+        &self,
+        control: &[usize],
+    ) -> (SmallVec<[usize; 32]>, SmallVec<[bool; 16]>) {
+        let mut new_control = SmallVec::new();
+        let mut execute = smallvec![true; self.simulators.len()];
         for c in control {
             let c = *self.logical_to_physical.get_by_left(c).unwrap();
             if self.is_local(c) {
@@ -186,23 +184,23 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> Block<G, S> {
                 if execute[i] {
                     match gate {
                         Gate::X => {
-                            s.pauli_x(*target, control);
+                            s.pauli_x(*target, control.as_slice());
                         }
                         Gate::Y => {
-                            s.pauli_y(*target, control);
+                            s.pauli_y(*target, control.as_slice());
                         }
                         Gate::Z => {
-                            s.pauli_z(*target, control);
+                            s.pauli_z(*target, control.as_slice());
                         }
                         Gate::H => {
-                            s.hadamard(*target, control);
+                            s.hadamard(*target, control.as_slice());
                         }
                         Gate::P(lambda) => {
-                            s.phase(*lambda, *target, control);
+                            s.phase(*lambda, *target, control.as_slice());
                         }
-                        Gate::RX(theta) => s.rx(*theta, *target, control),
-                        Gate::RY(theta) => s.ry(*theta, *target, control),
-                        Gate::RZ(theta) => s.rz(*theta, *target, control),
+                        Gate::RX(theta) => s.rx(*theta, *target, control.as_slice()),
+                        Gate::RY(theta) => s.ry(*theta, *target, control.as_slice()),
+                        Gate::RZ(theta) => s.rz(*theta, *target, control.as_slice()),
                     }
                 }
             }
@@ -228,11 +226,6 @@ impl<G, S: QuantumExecution + BlockSimulator<S, G>> QuantumExecution for Block<G
                 .parse::<usize>()
                 .unwrap_or(20),
         );
-
-        // #[cfg(debug_assertions)]
-        // {
-        //     println!("\x1b[1;95mBlock Size {block_size}\x1b[0m");
-        // }
 
         let num_local_qubits = block_size;
         let num_global_qubits = num_qubits - block_size;

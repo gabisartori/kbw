@@ -39,6 +39,7 @@ impl ConstantFloat for f32 {
 pub struct DenseGPU<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> {
     state_real: Rc<RefCell<cubecl::server::Handle>>,
     state_imag: Rc<RefCell<cubecl::server::Handle>>,
+    prob_buffer: Rc<RefCell<cubecl::server::Handle>>,
     offset: usize,
     state_size: usize,
     num_qubits: usize,
@@ -120,9 +121,12 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
             },
         );
 
+        let prob_buffer = Rc::new(RefCell::new(client.empty(state_size_bytes)));
+
         Ok(Self {
             state_real,
             state_imag,
+            prob_buffer,
             op_count: Rc::new(RefCell::new(0)),
             offset: 0,
             state_size,
@@ -398,10 +402,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
 
     fn measure_p1(&mut self, target: usize) -> f64 {
         let prob_size = 1 << (self.num_qubits - 1);
-        let prob = self
-            .client
-            .borrow()
-            .empty(prob_size * core::mem::size_of::<F>());
+        let prob = self.prob_buffer.borrow().clone();
 
         let mask = (1 << target) - 1;
 
@@ -523,10 +524,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + ConstantFloat> QuantumExecu
                     }
                 }
 
-                let prob = self
-                    .client
-                    .borrow()
-                    .empty(self.state_size * core::mem::size_of::<F>());
+                let prob = self.prob_buffer.borrow().clone();
 
                 let mut target_mask = 0;
                 for q in pauli_terms.iter().map(|term| term.qubit) {
@@ -624,6 +622,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
         let state_size_bytes = state_size * std::mem::size_of::<F>();
         let state_imag = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
         let state_real = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
+        let prob_buffer = Rc::new(RefCell::new(client.borrow().empty(state_size_bytes)));
 
         let op_count = Rc::new(RefCell::new(0));
 
@@ -649,6 +648,7 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             simulators.push(Self {
                 state_real: Rc::clone(&state_real),
                 state_imag: Rc::clone(&state_imag),
+                prob_buffer: Rc::clone(&prob_buffer),
                 offset: i * sub_state_size,
                 state_size: sub_state_size,
                 num_qubits: num_local_qubits,
@@ -672,57 +672,43 @@ impl<R: Runtime, F: Float + CubeElement + FloatOps + Display + ConstantFloat>
             Rc<RefCell<Handle>>,
             usize,
         ),
-        simulators: &mut [Self],
+        _simulators: &mut [Self],
         num_global_qubits: usize,
         num_local_qubits: usize,
         global_qubit: usize,
         local_qubit: usize,
     ) {
-        #[cfg(debug_assertions)]
-        {
-            println!("\x1b[1;95mBlock Data SWAP\x1b[0m global_qubit={global_qubit}, local_qubit={local_qubit}");
-        }
         let num_qubits = num_local_qubits + num_global_qubits;
         let state_size = 1usize << num_qubits;
 
         let (client, _, state_real, state_imag, _) = global_data;
 
-        let new_state_real = Rc::new(RefCell::new(
-            client
-                .borrow()
-                .empty(state_size * core::mem::size_of::<F>()),
-        ));
-        let new_state_imag = Rc::new(RefCell::new(
-            client
-                .borrow()
-                .empty(state_size * core::mem::size_of::<F>()),
-        ));
+        let global_index = global_qubit + num_local_qubits;
+        let bit1 = std::cmp::min(global_index, local_qubit);
+        let bit2 = std::cmp::max(global_index, local_qubit);
+        let mask1 = (1 << bit1) - 1;
+        let mask2 = (1 << bit2) - 1;
 
         launch_all(
-            num_qubits,
-            state_size,
+            num_qubits - 2,
+            state_size >> 2,
             |cube_count, cube_dim, offset| unsafe {
-                kernel::copy_swap::launch_unchecked::<F, R>(
+                kernel::in_place_swap::launch_unchecked::<F, R>(
                     &client.borrow(),
                     CubeCount::new_1d(cube_count),
                     CubeDim::new_1d(cube_dim),
                     ArrayArg::from_raw_parts(state_real.borrow().clone(), state_size),
                     ArrayArg::from_raw_parts(state_imag.borrow().clone(), state_size),
-                    ArrayArg::from_raw_parts(new_state_real.borrow_mut().clone(), state_size),
-                    ArrayArg::from_raw_parts(new_state_imag.borrow_mut().clone(), state_size),
                     offset,
-                    (global_qubit + num_local_qubits) as u32,
+                    global_index as u32,
                     local_qubit as u32,
+                    bit1 as u32,
+                    bit2 as u32,
+                    mask1 as u32,
+                    mask2 as u32,
                 );
             },
         );
-
-        *state_real = Rc::clone(&new_state_real);
-        *state_imag = Rc::clone(&new_state_imag);
-        for simulator in simulators {
-            simulator.state_real = Rc::clone(&new_state_real);
-            simulator.state_imag = Rc::clone(&new_state_imag);
-        }
     }
 
     fn print_global_state(

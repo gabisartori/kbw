@@ -14,43 +14,49 @@ pub(super) fn compute_cube_size(
     let full_block_size = target + 1;
     let num_blocks = 1u32 << (num_qubits - target - 1);
 
-    let mut cube_count_x = 1;
-    let mut cube_count_y = 1;
-    let mut cube_dim_x = num_blocks;
-    let mut cube_dim_y = half_block_size;
+    let mut cube_dim_x = half_block_size;
+    let mut cube_dim_y = num_blocks;
 
-    while cube_dim_x * cube_dim_y > 1024 {
-        if cube_dim_x > cube_dim_y {
-            cube_dim_x >>= 1;
-            cube_count_x <<= 1;
-        } else {
-            cube_dim_y >>= 1;
-            cube_count_y <<= 1;
-        }
+    if cube_dim_x > 1024 {
+        cube_dim_x = 1024;
     }
+    if cube_dim_x * cube_dim_y > 1024 {
+        cube_dim_y = 1024 / cube_dim_x;
+    }
+
+    let cube_count_x = half_block_size / cube_dim_x;
+    let cube_count_y = num_blocks / cube_dim_y;
 
     let mut cube_count_2_x = 1;
     let mut cube_count_2_y = 1;
+    let mut rem_count_x = cube_count_x;
+    let mut rem_count_y = cube_count_y;
 
-    while cube_count_x * cube_count_y > 65535 {
-        if cube_count_x > cube_count_y {
-            cube_count_x >>= 1;
-            cube_count_2_x <<= 1;
-        } else {
-            cube_count_y >>= 1;
-            cube_count_2_y <<= 1;
+    if rem_count_x > 65535 {
+        cube_count_2_x = rem_count_x / 65535;
+        if !rem_count_x.is_multiple_of(65535) {
+            cube_count_2_x += 1;
         }
+        rem_count_x /= cube_count_2_x;
     }
 
-    let stride_x = cube_count_x * cube_dim_x;
-    let stride_y = cube_count_y * cube_dim_y;
+    if rem_count_y > 65535 {
+        cube_count_2_y = rem_count_y / 65535;
+        if !rem_count_y.is_multiple_of(65535) {
+            cube_count_2_y += 1;
+        }
+        rem_count_y /= cube_count_2_y;
+    }
+
+    let stride_x = rem_count_x * cube_dim_x;
+    let stride_y = rem_count_y * cube_dim_y;
 
     (
         half_block_size,
         u32::try_from(full_block_size).unwrap(),
         (cube_count_2_x, cube_count_2_y),
         (stride_x, stride_y),
-        CubeCount::new_2d(cube_count_x, cube_count_y),
+        CubeCount::new_2d(rem_count_x, rem_count_y),
         CubeDim::new_2d(cube_dim_x, cube_dim_y),
     )
 }
@@ -65,8 +71,8 @@ pub(super) const fn compute_ket(
     count_offset_y: u32,
 ) -> (usize, usize, bool) {
     let ket0 = offset
-        + (((ABSOLUTE_POS_X + count_offset_x) << full_block_size)
-            + (ABSOLUTE_POS_Y + count_offset_y)) as usize;
+        + (((ABSOLUTE_POS_Y + count_offset_y) << full_block_size)
+            + (ABSOLUTE_POS_X + count_offset_x)) as usize;
     let ket1 = ket0 + half_block_size as usize;
 
     (
@@ -429,24 +435,34 @@ pub(super) fn exp_value<F: Float + ConstantFloat>(
 }
 
 #[cube(launch_unchecked)]
-pub(super) fn copy_swap<F: Float>(
-    old_state_real: &Array<F>,
-    old_state_imag: &Array<F>,
-    new_state_real: &mut Array<F>,
-    new_state_imag: &mut Array<F>,
+pub(super) fn in_place_swap<F: Float>(
+    state_real: &mut Array<F>,
+    state_imag: &mut Array<F>,
     offset: u32,
     global_index: u32,
     local_index: u32,
+    bit1: u32,
+    bit2: u32,
+    mask1: u32,
+    mask2: u32,
 ) {
-    let state = ABSOLUTE_POS_X + offset;
-    let global_bit = (state >> global_index) & 1;
-    let local_bit = (state >> local_index) & 1;
+    let compressed_idx = ABSOLUTE_POS_X + offset;
 
-    let src_state = state & !((1 << global_index) | (1 << local_index));
-    let src_state = src_state | (global_bit << local_index) | (local_bit << global_index);
+    let idx1 = ((compressed_idx >> bit1) << (bit1 + 1)) | (compressed_idx & mask1);
+    let state00 = ((idx1 >> bit2) << (bit2 + 1)) | (idx1 & mask2);
 
-    new_state_real[state as usize] = old_state_real[src_state as usize];
-    new_state_imag[state as usize] = old_state_imag[src_state as usize];
+    let state01 = state00 | (1 << local_index);
+    let state10 = state00 | (1 << global_index);
+
+    let r01 = state_real[state01 as usize];
+    let i01 = state_imag[state01 as usize];
+    let r10 = state_real[state10 as usize];
+    let i10 = state_imag[state10 as usize];
+
+    state_real[state01 as usize] = r10;
+    state_imag[state01 as usize] = i10;
+    state_real[state10 as usize] = r01;
+    state_imag[state10 as usize] = i01;
 }
 
 #[cube(launch_unchecked)]

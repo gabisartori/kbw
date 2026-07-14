@@ -169,7 +169,7 @@ pub type DenseGPUBlock = block::Block<
 
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`DenseGPUBlock`] backend.
 /// Note: the typo `DenseGPUS` is preserved for backwards compatibility.
-pub type DenseGPUSBlockSimulator = quantum_execution::QubitManager<DenseGPUBlock>;
+pub type DenseGPUBlockSimulator = quantum_execution::QubitManager<DenseGPUBlock>;
 
 /// Sparse state-vector simulator backed by a [`HashMap`](std::collections::HashMap),
 /// using `f32` amplitudes. Efficient for circuits that remain in a low-entanglement
