@@ -21,6 +21,7 @@
 
 use std::fmt::Display;
 
+#[cfg(feature = "block")]
 use crate::block::BlockSimulator;
 use crate::quantum_execution::QuantumExecution;
 use crate::{
@@ -340,6 +341,7 @@ impl<F: FloatOps> QuantumExecution for DenseV2<F> {
     }
 }
 
+#[cfg(feature = "block")]
 impl<F: FloatOps + Display> BlockSimulator<Self, ()> for DenseV2<F> {
     fn new_blocks(
         num_local_qubits: usize,

@@ -17,7 +17,14 @@
 
 use std::ffi::{c_char, CStr};
 
-use crate::{Dense, DenseGPU, DenseGPUBlock, DenseV2, Sparse, SparseV2};
+#[cfg(feature = "dense")]
+use crate::{Dense, DenseV2};
+
+#[cfg(feature = "gpu")]
+use crate::{DenseGPU, DenseGPUBlock};
+
+#[cfg(feature = "sparse")]
+use crate::{Sparse, SparseV2};
 use ket::{error::KetError, process::QPUConfig};
 
 use crate::quantum_execution::QubitManager;
@@ -68,18 +75,21 @@ pub unsafe extern "C" fn kbw_make_configuration(
 
     let Ok(Ok(coupling_graph)) = unsafe { CStr::from_ptr(coupling_graph_json) }
         .to_str()
-        .map(serde_json::from_str)
+        .map(serde_json::from_str::<Option<Vec<(usize, usize)>>>)
     else {
         return KetError::SerdeError.error_code();
     };
 
     let config = match simulator.as_str() {
+        #[cfg(feature = "dense")]
         "densev1" => {
             make_config::<Dense>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }
+        #[cfg(feature = "dense")]
         "dense" | "densev2" => {
             make_config::<DenseV2>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }
+        #[cfg(feature = "gpu")]
         "densegpu" => {
             if num_qubits
                 < std::env::var("KBW_BLOCK_SIZE")
@@ -98,9 +108,11 @@ pub unsafe extern "C" fn kbw_make_configuration(
                 )
             }
         }
+        #[cfg(feature = "sparse")]
         "sparse" => {
             make_config::<Sparse>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }
+        #[cfg(feature = "sparse")]
         "sparsev2" => {
             make_config::<SparseV2>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }

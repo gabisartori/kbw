@@ -69,14 +69,20 @@ use std::{
 };
 
 pub mod bitwise;
+#[cfg(feature = "block")]
 pub mod block;
 pub mod c_api;
 pub mod convert;
+#[cfg(feature = "dense")]
 pub mod dense;
+#[cfg(feature = "gpu")]
 pub mod dense_gpu;
+#[cfg(feature = "dense")]
 pub mod dense_v2;
 pub mod quantum_execution;
+#[cfg(feature = "sparse")]
 pub mod sparse;
+#[cfg(feature = "sparse")]
 pub mod sparse_v2;
 
 /// Extension trait that adds simulator-specific helpers on top of the standard
@@ -118,36 +124,45 @@ impl FloatOps for f64 {
     }
 }
 
+#[cfg(feature = "dense")]
 /// Double-buffered, dense state-vector simulator using `f32` amplitudes.
 /// Supports up to 32 qubits.
 pub type Dense = dense::Dense<f32>;
 
+#[cfg(feature = "dense")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`Dense`] backend.
 /// The recommended entry point for single-process dense simulation.
 pub type DenseSimulator = quantum_execution::QubitManager<Dense>;
 
+#[cfg(feature = "dense")]
 /// In-place dense state-vector simulator using `f32` amplitudes.
 /// Slightly lower memory overhead than [`Dense`] due to the single-buffer design.
 pub type DenseV2 = dense_v2::DenseV2<f32>;
 
+#[cfg(feature = "dense")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`DenseV2`] backend.
 pub type DenseV2Simulator = quantum_execution::QubitManager<DenseV2>;
 
+#[cfg(all(feature = "block", feature = "dense"))]
 /// Blocked [`DenseV2`] simulator that partitions the qubit register into
 /// *local* (simulated) and *global* (index) portions, enabling circuits
 /// with more qubits than fit in a single state-vector.
 pub type DenseV2Block = block::Block<(), DenseV2>;
 
+#[cfg(all(feature = "block", feature = "dense"))]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`DenseV2Block`] backend.
 pub type DenseV2BlockSimulator = quantum_execution::QubitManager<DenseV2Block>;
 
+#[cfg(feature = "gpu")]
 /// GPU-accelerated dense state-vector simulator using the WGPU runtime and `f32` amplitudes.
 /// Requires a compatible GPU and the `wgpu` feature of `CubeCL`.
 pub type DenseGPU = dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>;
 
+#[cfg(feature = "gpu")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`DenseGPU`] backend.
 pub type DenseGPUSimulator = quantum_execution::QubitManager<DenseGPU>;
 
+#[cfg(feature = "gpu")]
 /// Blocked GPU dense state-vector; combines the WGPU backend with the block
 /// partitioning scheme for circuits exceeding on-device memory.
 pub type DenseGPUBlock = block::Block<
@@ -161,21 +176,26 @@ pub type DenseGPUBlock = block::Block<
     dense_gpu::DenseGPU<cubecl::wgpu::WgpuRuntime, f32>,
 >;
 
+#[cfg(feature = "gpu")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`DenseGPUBlock`] backend.
 /// Note: the typo `DenseGPUS` is preserved for backwards compatibility.
 pub type DenseGPUBlockSimulator = quantum_execution::QubitManager<DenseGPUBlock>;
 
+#[cfg(feature = "sparse")]
 /// Sparse state-vector simulator backed by a [`HashMap`](std::collections::HashMap),
 /// using `f32` amplitudes. Efficient for circuits that remain in a low-entanglement
 /// regime (e.g. few non-zero amplitudes).
 pub type Sparse = sparse::Sparse<f32>;
 
+#[cfg(feature = "sparse")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`Sparse`] backend.
 pub type SparseSimulator = quantum_execution::QubitManager<Sparse>;
 
+#[cfg(feature = "sparse")]
 /// Sparse state-vector simulator backed by a sorted `Vec`, providing better
 /// cache locality than [`Sparse`] at the cost of periodic sort-and-reduce passes.
 pub type SparseV2 = sparse_v2::SparseV2<f32>;
 
+#[cfg(feature = "sparse")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`SparseV2`] backend.
 pub type SparseV2Simulator = quantum_execution::QubitManager<SparseV2>;
