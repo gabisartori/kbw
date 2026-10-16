@@ -84,6 +84,8 @@ pub mod quantum_execution;
 pub mod sparse;
 #[cfg(feature = "sparse")]
 pub mod sparse_v2;
+#[cfg(feature = "qmdd")]
+pub mod qmdd;
 
 /// Extension trait that adds simulator-specific helpers on top of the standard
 /// [`num_traits::Float`] and arithmetic-assignment bounds.
@@ -199,3 +201,8 @@ pub type SparseV2 = sparse_v2::SparseV2<f32>;
 #[cfg(feature = "sparse")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`SparseV2`] backend.
 pub type SparseV2Simulator = quantum_execution::QubitManager<SparseV2>;
+
+#[cfg(feature = "qmdd")]
+/// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`Qmdd`] backend.
+pub type Qmdd = qmdd::Qmdd<f32>;
+pub type QmddSimulator = quantum_execution::QubitManager<Qmdd>;

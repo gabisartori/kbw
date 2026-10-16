@@ -27,6 +27,9 @@ use crate::{DenseGPU, DenseGPUBlock};
 use crate::{Sparse, SparseV2};
 use ket::{error::KetError, process::QPUConfig};
 
+#[cfg(feature = "qmdd")]
+use crate::Qmdd;
+
 use crate::quantum_execution::QubitManager;
 
 /// Create a [`QPUConfig`] for the requested simulator and write the heap
@@ -37,7 +40,7 @@ use crate::quantum_execution::QubitManager;
 /// * `num_qubits`: number of qubits to allocate.
 /// * `simulator`: NUL-terminated C string naming the backend.  Recognised
 ///   values (case-insensitive, whitespace ignored): `"dense"`, `"densev2"`,
-///   `"densegpu"`, `"sparse"`, `"sparsev2"`.
+///   `"densegpu"`, `"sparse"`, `"sparsev2"`, `"qmdd"`.
 /// * `use_live`: `true` for live (gate-by-gate) mode; `false` for batch mode.
 /// * `gradient`: enable the parameter-shift-rule gradient strategy (batch
 ///   mode only).
@@ -115,6 +118,10 @@ pub unsafe extern "C" fn kbw_make_configuration(
         #[cfg(feature = "sparse")]
         "sparsev2" => {
             make_config::<SparseV2>(num_qubits, use_live, decompose, coupling_graph, gradient)
+        }
+        #[cfg(feature = "qmdd")]
+        "qmdd" => {
+            make_config::<Qmdd>(num_qubits, use_live, decompose, coupling_graph, gradient)
         }
         _ => Err(KetError::ExecutionFailed),
     };

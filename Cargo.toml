@@ -44,8 +44,9 @@ crate-type = ["cdylib", "rlib"]
 strip = true
 
 [features]
-default = ["dense", "sparse", "gpu"]
+default = ["dense", "sparse", "gpu", "qmdd"]
 gpu = ["block", "cubecl", "pollster"]
 dense = []
 sparse = ["rustc-hash"]
 block = ["bimap"]
+qmdd = []
