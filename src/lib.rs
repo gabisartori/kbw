@@ -204,5 +204,5 @@ pub type SparseV2Simulator = quantum_execution::QubitManager<SparseV2>;
 
 #[cfg(feature = "qmdd")]
 /// [`QubitManager`](quantum_execution::QubitManager) wrapping the [`Qmdd`] backend.
-pub type Qmdd = qmdd::Qmdd<f32>;
+pub type Qmdd = qmdd::Qmdd;
 pub type QmddSimulator = quantum_execution::QubitManager<Qmdd>;
