@@ -575,19 +575,6 @@ fn rz_matrix(theta: f64) -> [Complex; 4] {
     ]
 }
 
-fn create_basis_states(num_qubits: usize) -> Vec<Vec<u64>> {
-    let dim = 1 << num_qubits;
-    let mut basis_states = Vec::with_capacity(dim);
-    for i in 0..dim {
-        let mut state = Vec::with_capacity(num_qubits);
-        for j in 0..num_qubits {
-            state.push(((i >> j) & 1).try_into().unwrap());
-        }
-        basis_states.push(state);
-    }
-    basis_states
-}
-
 impl QuantumExecution for Qmdd {
     fn new(num_qubits: usize) -> Result<Self, KetError> {
         Ok(Self::new(num_qubits))
@@ -603,15 +590,60 @@ impl QuantumExecution for Qmdd {
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], rz_matrix(theta).to_vec())); }
 
     // Measurements
-    fn measure_p1(&mut self, target: usize) -> f64 { 1.0 }
-    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) { }
-    fn dump(&mut self, qubits: &[usize]) -> DumpData {
-        let output = self.dump_first_column();
-        DumpData {
-            basis_states: create_basis_states(self.num_vars),
-            amplitudes_real: output.iter().map(|c| c.re).collect(),
-            amplitudes_imag: output.iter().map(|c| c.im).collect()
+    fn measure_p1(&mut self, target: usize) -> f64 {
+        self.state
+            .iter()
+            .enumerate()
+            .filter(|(state, _)| ((state >> target) & 1) == 1)
+            .map(|(_, amp)| amp.re * amp.re + amp.im * amp.im)
+            .sum()
+    }
+
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
+        for (state, amp) in self.state.iter_mut().enumerate() {
+            if (((state >> target) & 1) == 1) == result {
+                amp.re *= p;
+                amp.im *= p;
+            } else {
+                *amp = Complex::zero();
+            }
         }
     }
-    fn clear(&mut self) { }
+
+    fn dump(&mut self, qubits: &[usize]) -> DumpData {
+        let output = self.dump_first_column();
+
+        let mut basis_states = Vec::new();
+        let mut amplitudes_real = Vec::new();
+        let mut amplitudes_imag = Vec::new();
+
+        for (state, amp) in output.iter().enumerate() {
+            let prob = amp.re * amp.re + amp.im * amp.im;
+            if prob <= f64::EPSILON {
+                continue;
+            }
+
+            let projected_state = qubits
+                .iter()
+                .rev()
+                .enumerate()
+                .map(|(index, qubit)| (((state >> qubit) & 1) as u64) << index)
+                .reduce(|a, b| a | b)
+                .unwrap_or(0);
+
+            basis_states.push(vec![projected_state]);
+            amplitudes_real.push(amp.re);
+            amplitudes_imag.push(amp.im);
+        }
+
+        DumpData {
+            basis_states,
+            amplitudes_real,
+            amplitudes_imag,
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = Self::new(self.num_vars);
+    }
 }
