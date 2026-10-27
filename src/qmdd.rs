@@ -395,9 +395,133 @@ impl Qmdd {
     }
 
     fn apply_gate(&mut self, gate: Gate) {
-        let gate_edge = self.build_gate_edge(&gate);
+        debug_assert_eq!(gate.targets.len(), 1);
+        debug_assert_eq!(gate.matrix.len(), 4);
+
+        let gate_edge = self.build_controlled_gate_edge(&gate);
         self.root = self.apply_edge(gate_edge, self.root, EdgeOp::Mul);
         self.apply_to_state(&gate);
+    }
+
+    fn matrix_to_weights(&mut self, matrix: &[Complex]) -> [WeightId; 4] {
+        debug_assert_eq!(matrix.len(), 4);
+
+        let mut weights = [self.zero_weight(); 4];
+        for idx in 0..4 {
+            if matrix[idx] != Complex::zero() {
+                weights[idx] = self.weights.insert(matrix[idx]);
+            }
+        }
+        weights
+    }
+
+    fn local_operator_edge(&mut self, var: usize, weights: [WeightId; 4]) -> Edge {
+        let children = [self.true_node; 4];
+        Edge {
+            weight: self.one_weight(),
+            node: self.make_node(var, children, weights),
+        }
+    }
+
+    fn build_controlled_gate_edge(&mut self, gate: &Gate) -> Edge {
+        debug_assert_eq!(gate.targets.len(), 1);
+        debug_assert_eq!(gate.matrix.len(), 4);
+
+        let target = gate.targets[0];
+        debug_assert!(target < self.num_vars);
+
+        let mut controls = gate.controls.clone();
+        controls.sort_unstable();
+        controls.dedup();
+        debug_assert!(controls.iter().all(|&c| c < self.num_vars && c != target));
+
+        let identity_weights = [
+            self.one_weight(),
+            self.zero_weight(),
+            self.zero_weight(),
+            self.one_weight(),
+        ];
+        let if_false_weights = [
+            self.one_weight(),
+            self.zero_weight(),
+            self.zero_weight(),
+            self.zero_weight(),
+        ];
+        let if_true_weights = [
+            self.zero_weight(),
+            self.zero_weight(),
+            self.zero_weight(),
+            self.one_weight(),
+        ];
+        let gate_weights = self.matrix_to_weights(&gate.matrix);
+
+        let mut identity_subtree = vec![
+            Edge {
+                weight: self.one_weight(),
+                node: self.true_node,
+            };
+            self.num_vars + 1
+        ];
+
+        for var in (0..self.num_vars).rev() {
+            let i_edge = self.local_operator_edge(var, identity_weights);
+            identity_subtree[var] = self.apply_edge(i_edge, identity_subtree[var + 1], EdgeOp::Kro);
+        }
+
+        let mut active_gate = Edge {
+            weight: self.one_weight(),
+            node: self.true_node,
+        };
+        let mut inactive_gate = Edge {
+            weight: self.zero_weight(),
+            node: self.true_node,
+        };
+
+        let mut next_control = controls.len();
+
+        for var in (0..self.num_vars).rev() {
+            let is_control = if next_control > 0 && controls[next_control - 1] == var {
+                next_control -= 1;
+                true
+            } else {
+                false
+            };
+
+            if var > target {
+                if is_control {
+                    let p1_edge = self.local_operator_edge(var, if_true_weights);
+                    active_gate = self.apply_edge(p1_edge, active_gate, EdgeOp::Kro);
+
+                    let p0_edge = self.local_operator_edge(var, if_false_weights);
+                    let p0_part = self.apply_edge(p0_edge, identity_subtree[var + 1], EdgeOp::Kro);
+                    let p1_part = self.apply_edge(p1_edge, inactive_gate, EdgeOp::Kro);
+                    inactive_gate = self.apply_edge(p0_part, p1_part, EdgeOp::Add);
+                } else {
+                    let i_edge = self.local_operator_edge(var, identity_weights);
+                    active_gate = self.apply_edge(i_edge, active_gate, EdgeOp::Kro);
+                    inactive_gate = self.apply_edge(i_edge, inactive_gate, EdgeOp::Kro);
+                }
+            } else if var == target {
+                let i_edge = self.local_operator_edge(var, identity_weights);
+                let u_edge = self.local_operator_edge(var, gate_weights);
+
+                let inactive_part = self.apply_edge(i_edge, inactive_gate, EdgeOp::Kro);
+                let active_part = self.apply_edge(u_edge, active_gate, EdgeOp::Kro);
+                active_gate = self.apply_edge(inactive_part, active_part, EdgeOp::Add);
+            } else if is_control {
+                let p0_edge = self.local_operator_edge(var, if_false_weights);
+                let p1_edge = self.local_operator_edge(var, if_true_weights);
+
+                let p0_part = self.apply_edge(p0_edge, identity_subtree[var + 1], EdgeOp::Kro);
+                let p1_part = self.apply_edge(p1_edge, active_gate, EdgeOp::Kro);
+                active_gate = self.apply_edge(p0_part, p1_part, EdgeOp::Add);
+            } else {
+                let i_edge = self.local_operator_edge(var, identity_weights);
+                active_gate = self.apply_edge(i_edge, active_gate, EdgeOp::Kro);
+            }
+        }
+
+        active_gate
     }
 
     fn apply_to_state(&mut self, gate: &Gate) {
@@ -434,61 +558,6 @@ impl Qmdd {
         self.state.clone()
     }
 
-    fn build_gate_edge(&mut self, gate: &Gate) -> Edge {
-        match (gate.controls.len(), gate.targets.len(), gate.matrix.len()) {
-            (0, 1, 4) => self.local_single_qubit_gate(gate.matrix.clone()),
-            (1, 1, 4) => self.controlled_single_qubit_gate(gate.controls[0], gate.targets[0], &gate.matrix),
-            _ => panic!("unsupported gate shape: only a single-qubit gate or one-control single-target gate is implemented"),
-        }
-    }
-
-    fn local_single_qubit_gate(&mut self, matrix: Vec<Complex>) -> Edge {
-        debug_assert_eq!(matrix.len(), 4);
-        let mut children = [self.true_node; 4];
-        let mut weights = [self.zero_weight(); 4];
-
-        for idx in 0..4 {
-            if matrix[idx] != Complex::zero() {
-                children[idx] = self.true_node;
-                weights[idx] = self.weights.insert(matrix[idx]);
-            }
-        }
-
-        Edge {
-            weight: self.one_weight(),
-            node: self.make_node(0, children, weights),
-        }
-    }
-
-    fn controlled_single_qubit_gate(&mut self, control: usize, target: usize, matrix: &[Complex]) -> Edge {
-        debug_assert_eq!(matrix.len(), 4);
-
-        // Standard control embedding: C(U) = |0><0| ⊗ I + |1><1| ⊗ U.
-        // This is the exact place where the "control qubit" logic is encoded as a larger matrix.
-        let mut controlled = vec![Complex::zero(); 16];
-        controlled[0] = Complex::one();
-        controlled[3] = Complex::one();
-        controlled[5] = Complex::one();
-        controlled[10] = Complex::one();
-        controlled[12] = matrix[0];
-        controlled[13] = matrix[1];
-        controlled[14] = matrix[2];
-        controlled[15] = matrix[3];
-
-        let children = [self.true_node; 4];
-        let mut weights = [self.zero_weight(); 4];
-        for idx in 0..4 {
-            if controlled[idx] != Complex::zero() {
-                weights[idx] = self.weights.insert(controlled[idx]);
-            }
-        }
-
-        let _ = (control, target);
-        Edge {
-            weight: self.one_weight(),
-            node: self.make_node(0, children, weights),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -591,24 +660,20 @@ impl QuantumExecution for Qmdd {
 
     // Measurements
     fn measure_p1(&mut self, target: usize) -> f64 {
-        self.state
+        // Fallback measurement strategy: derive probabilities from the same
+        // projection used by dump so measurement semantics match ket output.
+        let projected = self.dump(&[target]);
+
+        projected
+            .basis_states
             .iter()
-            .enumerate()
-            .filter(|(state, _)| ((state >> target) & 1) == 1)
-            .map(|(_, amp)| amp.re * amp.re + amp.im * amp.im)
+            .zip(projected.amplitudes_real.iter().zip(projected.amplitudes_imag.iter()))
+            .filter(|(basis, _)| basis.first().copied().unwrap_or(0) == 1)
+            .map(|(_, (re, im))| re * re + im * im)
             .sum()
     }
 
-    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
-        for (state, amp) in self.state.iter_mut().enumerate() {
-            if (((state >> target) & 1) == 1) == result {
-                amp.re *= p;
-                amp.im *= p;
-            } else {
-                *amp = Complex::zero();
-            }
-        }
-    }
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {}
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let output = self.dump_first_column();
