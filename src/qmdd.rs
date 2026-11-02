@@ -6,12 +6,16 @@ use ket::execution::DumpData;
 
 use std::collections::HashMap;
 
+// Wrappers for NodeId and WeightId to ensure type safety and avoid accidental misuse of u32 values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct NodeId(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct WeightId(u32);
 
+
+// A simple complex number struct to represent the weights in the QMDD.
+// TODO: real and imaginary parts should be represented as sqrt(2)-extended rational numbers so they can be better hashed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Complex {
     re: f64,
@@ -58,12 +62,14 @@ impl Complex {
     }
 }
 
+/// An edge in the QMDD, holding a weight and its target node
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Edge {
     weight: WeightId,
     node: NodeId,
 }
 
+/// A node in the QMDD, holding a variable and its four outgoing edges
 #[derive(Clone, Debug)]
 struct Node {
     var: usize,
@@ -71,6 +77,7 @@ struct Node {
     weights: [WeightId; 4],
 }
 
+/// Table for storing unique weights (complex numbers) and providing a mapping from WeightId to the actual complex value. This allows for efficient reuse of weights and avoids duplication.
 #[derive(Clone, Debug)]
 struct WeightTable {
     values: Vec<Complex>,
@@ -82,8 +89,9 @@ impl WeightTable {
             values: vec![Complex::zero(), Complex::one()],
         }
     }
-
+    /// Inserts a new weight into the table, or returns the existing weight if it already exists.
     fn insert(&mut self, value: Complex) -> WeightId {
+        // TODO: This should be done using a hash table. Since <Complex> is currently using f64 rather than sqrt(2)-extended rationals this isn't possible yet.
         for (idx, existing) in self.values.iter().enumerate() {
             if *existing == value {
                 return WeightId(idx as u32);
@@ -93,6 +101,7 @@ impl WeightTable {
         WeightId((self.values.len() - 1) as u32)
     }
 
+    /// Returns the complex value for a given weight ID.
     fn get(&self, id: WeightId) -> Complex {
         self.values[id.0 as usize]
     }
@@ -133,6 +142,7 @@ pub struct Qmdd {
 }
 
 impl Qmdd {
+    /// Initializes the structure, creating the true node and setting the root edge to point to it with a weight of 1.
     fn new(num_vars: usize) -> Self {
         let mut q = Self {
             num_vars,
@@ -161,7 +171,8 @@ impl Qmdd {
         q.state[0] = Complex::one();
         q
     }
-
+    /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
+    /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
     fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [WeightId; 4]) -> NodeId {
         let redundant = children.iter().zip(weights.iter()).all(|(child, w)| *child == children[0] && *w == weights[0]);
         if redundant {
@@ -179,6 +190,7 @@ impl Qmdd {
         id
     }
 
+    // Fundamental functions for QMDD operations, as described in section 3.3.1
     fn identity_edge(&self) -> Edge {
         Edge {
             weight: WeightId(1),
@@ -217,6 +229,7 @@ impl Qmdd {
         }
     }
 
+    /// Wrapper for weight operations that caches results to avoid redundant computations
     fn apply_weight(&mut self, w0: WeightId, w1: WeightId, op: WeightOp) -> WeightId {
         let a = self.weights.get(w0);
         let b = self.weights.get(w1);
@@ -229,6 +242,8 @@ impl Qmdd {
         self.weights.insert(value)
     }
 
+    /// Algorithm for normalizing weights, described in section 3.3.2
+    /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
     fn normalize_weights(&mut self, weights: &mut [WeightId; 4]) -> WeightId {
         let zero = self.zero_weight();
         let pivot_idx = weights.iter().position(|w| *w != zero);
@@ -246,6 +261,7 @@ impl Qmdd {
         pivot
     }
 
+    /// Algorithm for applying edges, described in section 3.3.3
     fn add_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
             if e0.weight == self.zero_weight() {
@@ -296,6 +312,7 @@ impl Qmdd {
         }
     }
 
+    /// Algorithm for multiplying edges, described in section 3.3.4
     fn mul_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
             if e0.weight == self.zero_weight() {
@@ -347,6 +364,7 @@ impl Qmdd {
         }
     }
 
+    /// Algorithm for Kronecker product of edges, described in section 3.3.5.1
     fn kro_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
             if e0.weight == self.zero_weight() {
@@ -378,6 +396,7 @@ impl Qmdd {
         }
     }
 
+    /// Wrapper for edge operations that caches results to avoid redundant computations
     fn apply_edge(&mut self, e0: Edge, e1: Edge, op: EdgeOp) -> Edge {
         let key = (e0, e1, op);
         if let Some(&cached) = self.edge_cache.get(&key) {
@@ -394,15 +413,20 @@ impl Qmdd {
         result
     }
 
+    /// Interface for applying an arbitrary quantum gate to the current QMDD, updating the root edge accordingly
     fn apply_gate(&mut self, gate: Gate) {
         debug_assert_eq!(gate.targets.len(), 1);
         debug_assert_eq!(gate.matrix.len(), 4);
 
         let gate_edge = self.build_controlled_gate_edge(&gate);
         self.root = self.apply_edge(gate_edge, self.root, EdgeOp::Mul);
+        
+        // TODO: This should be removed, there shouldn't be an exponential state vector in the QMDD implementation.
         self.apply_to_state(&gate);
     }
 
+    /// Convert a 4x4 matrix of complex numbers to a 4-element array of WeightId
+    /// It checks whether the desired weights are already present in the weight table and reuses them if possible, otherwise it inserts new weights.
     fn matrix_to_weights(&mut self, matrix: &[Complex]) -> [WeightId; 4] {
         debug_assert_eq!(matrix.len(), 4);
 
@@ -415,6 +439,7 @@ impl Qmdd {
         weights
     }
 
+    // TODO: Not sure what this does
     fn local_operator_edge(&mut self, var: usize, weights: [WeightId; 4]) -> Edge {
         let children = [self.true_node; 4];
         Edge {
@@ -423,6 +448,7 @@ impl Qmdd {
         }
     }
 
+    /// Resuses logic from the paper to build a controlled gate edge from a given gate, which can then be applied to the QMDD.
     fn build_controlled_gate_edge(&mut self, gate: &Gate) -> Edge {
         debug_assert_eq!(gate.targets.len(), 1);
         debug_assert_eq!(gate.matrix.len(), 4);
@@ -524,6 +550,7 @@ impl Qmdd {
         active_gate
     }
 
+    // TODO: I should figure out what this is doing. I had a feeling it'd be similar to dense simulation but it seems to be something else.
     fn apply_to_state(&mut self, gate: &Gate) {
         debug_assert!(!gate.targets.is_empty());
         debug_assert_eq!(gate.matrix.len(), 4);
@@ -554,12 +581,14 @@ impl Qmdd {
         self.state = next;
     }
 
+    /// Dumps the first column of the current state vector.
     fn dump_first_column(&self) -> Vec<Complex> {
         self.state.clone()
     }
 
 }
 
+/// A struct representing a quantum gate, including its control qubits, target qubits, and the corresponding matrix representation.
 #[derive(Clone, Debug)]
 struct Gate {
     controls: Vec<usize>,
@@ -577,6 +606,8 @@ impl Gate {
     }
 }
 
+
+// Predefined matrices used by Ket's quantum execution interface.
 const PAULI_X_MATRIX: [Complex; 4] = [
     Complex { re: 0.0, im: 0.0 },
     Complex { re: 1.0, im: 0.0 },
@@ -662,6 +693,7 @@ impl QuantumExecution for Qmdd {
     fn measure_p1(&mut self, target: usize) -> f64 {
         // Fallback measurement strategy: derive probabilities from the same
         // projection used by dump so measurement semantics match ket output.
+        // TODO: Fix this to use the QMDD directly instead of dumping to a state vector.
         let projected = self.dump(&[target]);
 
         projected
@@ -675,6 +707,7 @@ impl QuantumExecution for Qmdd {
 
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {}
 
+    // TODO: No idea what's happening here
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let output = self.dump_first_column();
 
