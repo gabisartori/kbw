@@ -39,10 +39,6 @@ impl Complex {
         Self::new(self.re + other.re, self.im + other.im)
     }
 
-    fn sub(self, other: Self) -> Self {
-        Self::new(self.re - other.re, self.im - other.im)
-    }
-
     fn mul(self, other: Self) -> Self {
         Self::new(
             self.re * other.re - self.im * other.im,
@@ -117,7 +113,6 @@ enum EdgeOp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WeightOp {
     Add,
-    Sub,
     Mul,
     Div,
 }
@@ -191,13 +186,6 @@ impl Qmdd {
     }
 
     // Fundamental functions for QMDD operations, as described in section 3.3.1
-    fn identity_edge(&self) -> Edge {
-        Edge {
-            weight: WeightId(1),
-            node: self.true_node,
-        }
-    }
-
     fn zero_weight(&self) -> WeightId {
         WeightId(0)
     }
@@ -235,7 +223,6 @@ impl Qmdd {
         let b = self.weights.get(w1);
         let value = match op {
             WeightOp::Add => a.add(b),
-            WeightOp::Sub => a.sub(b),
             WeightOp::Mul => a.mul(b),
             WeightOp::Div => a.div(b),
         };
