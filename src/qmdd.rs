@@ -726,3 +726,83 @@ impl QuantumExecution for Qmdd {
         *self = Self::new(self.num_vars);
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconstruct_state_uses_graph_paths_instead_of_persistent_state() {
+        let mut sim = Qmdd::new(2);
+        let root_weight = sim.weights.insert(Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0));
+        let zero = sim.zero_weight();
+        let one = sim.one_weight();
+        let terminal = sim.true_node;
+
+        let q10 = NodeId(1);
+        let q11 = NodeId(2);
+        let q0 = NodeId(3);
+
+        sim.nodes = vec![
+            Node {
+                var: 2,
+                children: [terminal; 4],
+                weights: [one; 4],
+            },
+            Node {
+                var: 1,
+                children: [terminal, terminal, terminal, terminal],
+                weights: [one, zero, zero, one],
+            },
+            Node {
+                var: 1,
+                children: [terminal, terminal, terminal, terminal],
+                weights: [zero, zero, one, zero],
+            },
+            Node {
+                var: 0,
+                children: [q10, terminal, q11, terminal],
+                weights: [one, zero, one, zero],
+            },
+        ];
+        sim.node_index.insert(
+            NodeKey {
+                var: 1,
+                children: [terminal, terminal, terminal, terminal],
+                weights: [one, zero, zero, one],
+            },
+            q10,
+        );
+        sim.node_index.insert(
+            NodeKey {
+                var: 1,
+                children: [terminal, terminal, terminal, terminal],
+                weights: [zero, zero, one, zero],
+            },
+            q11,
+        );
+        sim.node_index.insert(
+            NodeKey {
+                var: 0,
+                children: [q10, terminal, q11, terminal],
+                weights: [one, zero, one, zero],
+            },
+            q0,
+        );
+        sim.root = Edge { weight: root_weight, node: q0 };
+
+        let state = sim.reconstruct_state();
+        let expected = vec![
+            Complex::new(1.0 / std::f64::consts::SQRT_2, 0.0),
+            Complex::zero(),
+            Complex::zero(),
+            Complex::new(1.0 / std::f64::consts::SQRT_2, 0.0),
+        ];
+
+        for (actual, expected) in state.iter().zip(expected.iter()) {
+            assert!((actual.re - expected.re).abs() < 1e-12, "unexpected real component: {actual:?} != {expected:?}");
+            assert!((actual.im - expected.im).abs() < 1e-12, "unexpected imaginary component: {actual:?} != {expected:?}");
+        }
+    }
+}
