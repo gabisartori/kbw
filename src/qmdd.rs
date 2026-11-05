@@ -133,7 +133,6 @@ pub struct Qmdd {
     weights: WeightTable,
     edge_cache: HashMap<(Edge, Edge, EdgeOp), Edge>,
     root: Edge,
-    state: Vec<Complex>,
 }
 
 impl Qmdd {
@@ -150,7 +149,6 @@ impl Qmdd {
                 weight: WeightId(1),
                 node: NodeId(0),
             },
-            state: vec![Complex::zero(); 1usize << num_vars],
         };
 
         q.nodes.push(Node {
@@ -163,7 +161,6 @@ impl Qmdd {
             weight: WeightId(1),
             node: q.true_node,
         };
-        q.state[0] = Complex::one();
         q
     }
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
@@ -407,9 +404,6 @@ impl Qmdd {
 
         let gate_edge = self.build_controlled_gate_edge(&gate);
         self.root = self.apply_edge(gate_edge, self.root, EdgeOp::Mul);
-        
-        // TODO: This should be removed, there shouldn't be an exponential state vector in the QMDD implementation.
-        self.apply_to_state(&gate);
     }
 
     /// Convert a 4x4 matrix of complex numbers to a 4-element array of WeightId
@@ -537,40 +531,41 @@ impl Qmdd {
         active_gate
     }
 
-    // TODO: I should figure out what this is doing. I had a feeling it'd be similar to dense simulation but it seems to be something else.
-    fn apply_to_state(&mut self, gate: &Gate) {
-        debug_assert!(!gate.targets.is_empty());
-        debug_assert_eq!(gate.matrix.len(), 4);
-
+    /// Rebuild the full computational-basis amplitudes for the current QMDD.
+    ///
+    /// Each basis state is traversed through the graph by selecting the edge
+    /// corresponding to the bit value of each qubit. The chosen path multiplies
+    /// the root weight by every traversed edge weight until the terminal node is
+    /// reached.
+    fn reconstruct_state(&self) -> Vec<Complex> {
         let dim = 1usize << self.num_vars;
-        let mut next = self.state.clone();
-        let target = gate.targets[0];
-        let matrix = &gate.matrix;
+        let mut state = vec![Complex::zero(); dim];
 
-        for idx in 0..dim {
-            if ((idx >> target) & 1) != 0 {
-                continue;
-            }
-
-            let controls_ok = gate.controls.iter().all(|&control| ((idx >> control) & 1) == 1);
-            if !controls_ok {
-                continue;
-            }
-
-            let partner = idx | (1 << target);
-            let a0 = self.state[idx];
-            let a1 = self.state[partner];
-
-            next[idx] = matrix[0].mul(a0).add(matrix[1].mul(a1));
-            next[partner] = matrix[2].mul(a0).add(matrix[3].mul(a1));
+        if self.root.node == self.true_node {
+            state[0] = self.weights.get(self.root.weight);
+            return state;
         }
 
-        self.state = next;
-    }
+        for basis in 0..dim {
+            let mut value = self.weights.get(self.root.weight);
+            let mut current = self.root;
 
-    /// Dumps the first column of the current state vector.
-    fn dump_first_column(&self) -> Vec<Complex> {
-        self.state.clone()
+            for bit_index in 0..self.num_vars {
+                let bit = (basis >> bit_index) & 1;
+                let child_index = if bit == 0 { 0 } else { 2 };
+                let next = self.get_ei(current, child_index);
+                value = value.mul(self.weights.get(next.weight));
+                current = next;
+
+                if current.node == self.true_node {
+                    break;
+                }
+            }
+
+            state[basis] = value;
+        }
+
+        state
     }
 
 }
@@ -692,11 +687,10 @@ impl QuantumExecution for Qmdd {
             .sum()
     }
 
-    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {}
+    fn measure_collapse(&mut self, _target: usize, _result: bool, _p: f64) {}
 
-    // TODO: No idea what's happening here
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
-        let output = self.dump_first_column();
+        let output = self.reconstruct_state();
 
         let mut basis_states = Vec::new();
         let mut amplitudes_real = Vec::new();
