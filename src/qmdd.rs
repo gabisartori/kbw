@@ -399,17 +399,13 @@ impl Qmdd {
 
     /// Interface for applying an arbitrary quantum gate to the current QMDD, updating the root edge accordingly
     fn apply_gate(&mut self, gate: Gate) {
-        debug_assert_eq!(gate.targets.len(), 1);
-        debug_assert_eq!(gate.matrix.len(), 4);
-
         let gate_edge = self.build_controlled_gate_edge(&gate);
         self.root = self.apply_edge(gate_edge, self.root, EdgeOp::Mul);
     }
 
     /// Convert a 4x4 matrix of complex numbers to a 4-element array of WeightId
     /// It checks whether the desired weights are already present in the weight table and reuses them if possible, otherwise it inserts new weights.
-    fn matrix_to_weights(&mut self, matrix: &[Complex]) -> [WeightId; 4] {
-        debug_assert_eq!(matrix.len(), 4);
+    fn matrix_to_weights(&mut self, matrix: &[Complex; 4]) -> [WeightId; 4] {
 
         let mut weights = [self.zero_weight(); 4];
         for idx in 0..4 {
@@ -431,16 +427,12 @@ impl Qmdd {
 
     /// Resuses logic from the paper to build a controlled gate edge from a given gate, which can then be applied to the QMDD.
     fn build_controlled_gate_edge(&mut self, gate: &Gate) -> Edge {
-        debug_assert_eq!(gate.targets.len(), 1);
-        debug_assert_eq!(gate.matrix.len(), 4);
-
-        let target = gate.targets[0];
-        debug_assert!(target < self.num_vars);
+        debug_assert!(gate.target < self.num_vars);
 
         let mut controls = gate.controls.clone();
         controls.sort_unstable();
         controls.dedup();
-        debug_assert!(controls.iter().all(|&c| c < self.num_vars && c != target));
+        debug_assert!(controls.iter().all(|&c| c < self.num_vars && c != gate.target));
 
         let identity_weights = [
             self.one_weight(),
@@ -494,7 +486,7 @@ impl Qmdd {
                 false
             };
 
-            if var > target {
+            if var > gate.target {
                 if is_control {
                     let p1_edge = self.local_operator_edge(var, if_true_weights);
                     active_gate = self.apply_edge(p1_edge, active_gate, EdgeOp::Kro);
@@ -508,7 +500,7 @@ impl Qmdd {
                     active_gate = self.apply_edge(i_edge, active_gate, EdgeOp::Kro);
                     inactive_gate = self.apply_edge(i_edge, inactive_gate, EdgeOp::Kro);
                 }
-            } else if var == target {
+            } else if var == gate.target {
                 let i_edge = self.local_operator_edge(var, identity_weights);
                 let u_edge = self.local_operator_edge(var, gate_weights);
 
@@ -574,15 +566,15 @@ impl Qmdd {
 #[derive(Clone, Debug)]
 struct Gate {
     controls: Vec<usize>,
-    targets: Vec<usize>,
-    matrix: Vec<Complex>,
+    target: usize,
+    matrix: [Complex; 4],
 }
 
 impl Gate {
-    fn new(controls: Vec<usize>, targets: Vec<usize>, matrix: Vec<Complex>) -> Self {
+    fn new(controls: Vec<usize>, target: usize, matrix: [Complex; 4]) -> Self {
         Self {
             controls,
-            targets,
+            target,
             matrix,
         }
     }
@@ -662,14 +654,14 @@ impl QuantumExecution for Qmdd {
         Ok(Self::new(num_qubits))
     }
     // Gates
-    fn pauli_x(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], PAULI_X_MATRIX.to_vec())); }
-    fn pauli_y(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], PAULI_Y_MATRIX.to_vec())); }
-    fn pauli_z(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], PAULI_Z_MATRIX.to_vec())); }
-    fn hadamard(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], HADAMARD_MATRIX.to_vec())); }
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], phase_matrix(lambda).to_vec())); }
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], rx_matrix(theta).to_vec())); }
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], ry_matrix(theta).to_vec())); }
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), vec![target], rz_matrix(theta).to_vec())); }
+    fn pauli_x(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_X_MATRIX)); }
+    fn pauli_y(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Y_MATRIX)); }
+    fn pauli_z(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Z_MATRIX)); }
+    fn hadamard(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, HADAMARD_MATRIX)); }
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, phase_matrix(lambda))); }
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, rx_matrix(theta))); }
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, ry_matrix(theta))); }
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, rz_matrix(theta))); }
 
     // Measurements
     fn measure_p1(&mut self, target: usize) -> f64 {
