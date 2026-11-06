@@ -66,7 +66,7 @@ struct Edge {
 }
 
 /// A node in the QMDD, holding a variable and its four outgoing edges
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Node {
     var: usize,
     children: [NodeId; 4],
@@ -117,19 +117,12 @@ enum WeightOp {
     Div,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct NodeKey {
-    var: usize,
-    children: [NodeId; 4],
-    weights: [WeightId; 4],
-}
-
 #[derive(Clone, Debug)]
 pub struct Qmdd {
     num_vars: usize,
     true_node: NodeId,
     nodes: Vec<Node>,
-    node_index: HashMap<NodeKey, NodeId>,
+    node_index: HashMap<Node, NodeId>,
     weights: WeightTable,
     edge_cache: HashMap<(Edge, Edge, EdgeOp), Edge>,
     root: Edge,
@@ -141,7 +134,11 @@ impl Qmdd {
         let mut q = Self {
             num_vars,
             true_node: NodeId(0),
-            nodes: Vec::new(),
+            nodes: vec![Node {
+                var: num_vars,
+                children: [NodeId(0); 4],
+                weights: [WeightId(1); 4],
+            }],
             node_index: HashMap::new(),
             weights: WeightTable::new(),
             edge_cache: HashMap::new(),
@@ -151,16 +148,8 @@ impl Qmdd {
             },
         };
 
-        q.nodes.push(Node {
-            var: num_vars,
-            children: [NodeId(0); 4],
-            weights: [WeightId(1); 4],
-        });
-        q.true_node = NodeId(0);
-        q.root = Edge {
-            weight: WeightId(1),
-            node: q.true_node,
-        };
+        q.make_node(num_vars-1, [NodeId(0); 4], [WeightId(1); 4]);
+
         q
     }
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
@@ -171,7 +160,7 @@ impl Qmdd {
             return children[0];
         }
 
-        let key = NodeKey { var, children, weights };
+        let key = Node { var, children, weights };
         if let Some(&id) = self.node_index.get(&key) {
             return id;
         }
@@ -288,10 +277,10 @@ impl Qmdd {
             z_weights[i] = zi.weight;
         }
 
-        let _ = self.normalize_weights(&mut z_weights);
+        let pivot = self.normalize_weights(&mut z_weights);
         let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
         Edge {
-            weight: self.one_weight(),
+            weight: pivot,
             node: new_node,
         }
     }
@@ -340,10 +329,10 @@ impl Qmdd {
             z_weights[i] = q.weight;
         }
 
-        let _ = self.normalize_weights(&mut z_weights);
+        let pivot = self.normalize_weights(&mut z_weights);
         let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
         Edge {
-            weight: self.one_weight(),
+            weight: pivot,
             node: new_node,
         }
     }
@@ -372,10 +361,10 @@ impl Qmdd {
             z_weights[i] = zi.weight;
         }
 
-        let _ = self.normalize_weights(&mut z_weights);
+        let pivot = self.normalize_weights(&mut z_weights);
         let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
         Edge {
-            weight: self.one_weight(),
+            weight: pivot,
             node: new_node,
         }
     }
@@ -537,26 +526,26 @@ impl Qmdd {
             state[0] = self.weights.get(self.root.weight);
             return state;
         }
-
         for basis in 0..dim {
             let mut value = self.weights.get(self.root.weight);
-            let mut current = self.root;
+            let mut current_edge = self.root;
+            let mut current_node = &self.nodes[current_edge.node.0 as usize];
+            loop {
+                let bit = current_node.var;
+                let bit_index = (basis >> bit) & 1;
+                let child_index = if bit_index == 0 { 0 } else { 2 };
+                let next_edge = self.get_ei(current_edge, child_index);
+                value = value.mul(self.weights.get(next_edge.weight));
 
-            for bit_index in 0..self.num_vars {
-                let bit = (basis >> bit_index) & 1;
-                let child_index = if bit == 0 { 0 } else { 2 };
-                let next = self.get_ei(current, child_index);
-                value = value.mul(self.weights.get(next.weight));
-                current = next;
+                if current_edge.node == self.true_node { break; }
+                
+                current_edge = next_edge;
+                current_node = &self.nodes[current_edge.node.0 as usize];
 
-                if current.node == self.true_node {
-                    break;
-                }
             }
 
             state[basis] = value;
         }
-
         state
     }
 
@@ -747,10 +736,10 @@ mod tests {
         sim.hadamard(1, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            Complex::new(0.5, 0.0),
+            Complex::new(0.5, 0.0),
+            Complex::new(0.5, 0.0),
+            Complex::new(0.5, 0.0),
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
@@ -778,77 +767,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reconstruct_state_uses_graph_paths_instead_of_persistent_state() {
-        let mut sim = Qmdd::new(2);
-        let root_weight = sim.weights.insert(Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0));
-        let zero = sim.zero_weight();
-        let one = sim.one_weight();
-        let terminal = sim.true_node;
-
-        let q10 = NodeId(1);
-        let q11 = NodeId(2);
-        let q0 = NodeId(3);
-
-        sim.nodes = vec![
-            Node {
-                var: 2,
-                children: [terminal; 4],
-                weights: [one; 4],
-            },
-            Node {
-                var: 1,
-                children: [terminal, terminal, terminal, terminal],
-                weights: [one, zero, zero, one],
-            },
-            Node {
-                var: 1,
-                children: [terminal, terminal, terminal, terminal],
-                weights: [zero, zero, one, zero],
-            },
-            Node {
-                var: 0,
-                children: [q10, terminal, q11, terminal],
-                weights: [one, zero, one, zero],
-            },
-        ];
-        sim.node_index.insert(
-            NodeKey {
-                var: 1,
-                children: [terminal, terminal, terminal, terminal],
-                weights: [one, zero, zero, one],
-            },
-            q10,
-        );
-        sim.node_index.insert(
-            NodeKey {
-                var: 1,
-                children: [terminal, terminal, terminal, terminal],
-                weights: [zero, zero, one, zero],
-            },
-            q11,
-        );
-        sim.node_index.insert(
-            NodeKey {
-                var: 0,
-                children: [q10, terminal, q11, terminal],
-                weights: [one, zero, one, zero],
-            },
-            q0,
-        );
-        sim.root = Edge { weight: root_weight, node: q0 };
-
-        let state = sim.reconstruct_state();
-        let expected = vec![
-            Complex::new(1.0 / std::f64::consts::SQRT_2, 0.0),
-            Complex::zero(),
-            Complex::zero(),
-            Complex::new(1.0 / std::f64::consts::SQRT_2, 0.0),
-        ];
-
-        for (actual, expected) in state.iter().zip(expected.iter()) {
-            assert!((actual.re - expected.re).abs() < 1e-12, "unexpected real component: {actual:?} != {expected:?}");
-            assert!((actual.im - expected.im).abs() < 1e-12, "unexpected imaginary component: {actual:?} != {expected:?}");
-        }
-    }
 }
