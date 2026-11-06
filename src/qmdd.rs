@@ -6,13 +6,8 @@ use ket::execution::DumpData;
 
 use std::collections::HashMap;
 
-// Wrappers for NodeId and WeightId to ensure type safety and avoid accidental misuse of u32 values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct NodeId(u32);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct WeightId(u32);
-
+type NodeId = usize;
+type WeightId = usize;
 
 // A simple complex number struct to represent the weights in the QMDD.
 // TODO: real and imaginary parts should be represented as sqrt(2)-extended rational numbers so they can be better hashed.
@@ -90,16 +85,16 @@ impl WeightTable {
         // TODO: This should be done using a hash table. Since <Complex> is currently using f64 rather than sqrt(2)-extended rationals this isn't possible yet.
         for (idx, existing) in self.values.iter().enumerate() {
             if *existing == value {
-                return WeightId(idx as u32);
+                return idx;
             }
         }
         self.values.push(value);
-        WeightId((self.values.len() - 1) as u32)
+        self.values.len() - 1
     }
 
     /// Returns the complex value for a given weight ID.
     fn get(&self, id: WeightId) -> Complex {
-        self.values[id.0 as usize]
+        self.values[id]
     }
 }
 
@@ -133,22 +128,22 @@ impl Qmdd {
     fn new(num_vars: usize) -> Self {
         let mut q = Self {
             num_vars,
-            true_node: NodeId(0),
+            true_node: 0,
             nodes: vec![Node {
                 var: num_vars,
-                children: [NodeId(0); 4],
-                weights: [WeightId(1); 4],
+                children: [0; 4],
+                weights: [1; 4],
             }],
             node_index: HashMap::new(),
             weights: WeightTable::new(),
             edge_cache: HashMap::new(),
             root: Edge {
-                weight: WeightId(1),
-                node: NodeId(0),
+                weight: 1,
+                node: 0,
             },
         };
 
-        q.make_node(num_vars-1, [NodeId(0); 4], [WeightId(1); 4]);
+        q.make_node(num_vars-1, [0; 4], [1; 4]);
 
         q
     }
@@ -165,7 +160,7 @@ impl Qmdd {
             return id;
         }
 
-        let id = NodeId(self.nodes.len() as u32);
+        let id = self.nodes.len();
         self.nodes.push(Node { var, children, weights });
         self.node_index.insert(key, id);
         id
@@ -173,23 +168,23 @@ impl Qmdd {
 
     // Fundamental functions for QMDD operations, as described in section 3.3.1
     fn zero_weight(&self) -> WeightId {
-        WeightId(0)
+        0
     }
 
     fn one_weight(&self) -> WeightId {
-        WeightId(1)
+        1
     }
 
     fn node_var(&self, node: NodeId) -> usize {
-        self.nodes[node.0 as usize].var
+        self.nodes[node].var
     }
 
     fn child(&self, node: NodeId, idx: usize) -> NodeId {
-        self.nodes[node.0 as usize].children[idx]
+        self.nodes[node].children[idx]
     }
 
     fn weight_at(&self, node: NodeId, idx: usize) -> WeightId {
-        self.nodes[node.0 as usize].weights[idx]
+        self.nodes[node].weights[idx]
     }
 
     fn edge_is_terminal(&self, e: Edge) -> bool {
@@ -529,7 +524,7 @@ impl Qmdd {
         for basis in 0..dim {
             let mut value = self.weights.get(self.root.weight);
             let mut current_edge = self.root;
-            let mut current_node = &self.nodes[current_edge.node.0 as usize];
+            let mut current_node = &self.nodes[current_edge.node];
             loop {
                 let bit = current_node.var;
                 let bit_index = (basis >> bit) & 1;
@@ -540,7 +535,7 @@ impl Qmdd {
                 if current_edge.node == self.true_node { break; }
                 
                 current_edge = next_edge;
-                current_node = &self.nodes[current_edge.node.0 as usize];
+                current_node = &self.nodes[current_edge.node];
 
             }
 
