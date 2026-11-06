@@ -129,6 +129,7 @@ impl Qmdd {
         let mut q = Self {
             num_vars,
             true_node: 0,
+            // Terminal node points to itself since it'll never actually be followed
             nodes: vec![Node {
                 var: num_vars,
                 children: [0; 4],
@@ -143,7 +144,18 @@ impl Qmdd {
             },
         };
 
-        q.make_node(num_vars-1, [0; 4], [1; 4]);
+        let identity_weights = [q.one_weight(), q.zero_weight(), q.zero_weight(), q.one_weight()];
+        let mut root = Edge {
+            weight: q.one_weight(),
+            node: q.true_node,
+        };
+
+        // Build the n-qubit identity operator as a Kronecker chain.
+        for var in (0..num_vars).rev() {
+            let i_edge = q.local_operator_edge(var, identity_weights);
+            root = q.apply_edge(i_edge, root, EdgeOp::Kro);
+        }
+        q.root = root;
 
         q
     }
@@ -302,26 +314,38 @@ impl Qmdd {
         let mut z_children = [self.true_node; 4];
         let mut z_weights = [self.zero_weight(); 4];
 
-        for i in 0..4 {
-            let ei0 = self.get_ei(e0, i);
-            let q0 = Edge {
-                weight: self.apply_weight(e0.weight, ei0.weight, WeightOp::Mul),
-                node: ei0.node,
-            };
+        // 2x2 block-matrix multiplication across quadrants.
+        for i in (0..4).step_by(2) {
+            for j in 0..2 {
+                let mut zij = Edge {
+                    weight: self.zero_weight(),
+                    node: self.true_node,
+                };
 
-            let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
-                let ei1 = self.get_ei(e1, i);
-                Edge {
-                    weight: self.apply_weight(e1.weight, ei1.weight, WeightOp::Mul),
-                    node: ei1.node,
+                for k in 0..2 {
+                    let ei0 = self.get_ei(e0, i + k);
+                    let q0 = Edge {
+                        weight: self.apply_weight(e0.weight, ei0.weight, WeightOp::Mul),
+                        node: ei0.node,
+                    };
+
+                    let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
+                        let ei1 = self.get_ei(e1, j + 2 * k);
+                        Edge {
+                            weight: self.apply_weight(e1.weight, ei1.weight, WeightOp::Mul),
+                            node: ei1.node,
+                        }
+                    } else {
+                        e1
+                    };
+
+                    let q0q1 = self.apply_edge(q0, q1, EdgeOp::Mul);
+                    zij = self.apply_edge(zij, q0q1, EdgeOp::Add);
                 }
-            } else {
-                e1
-            };
 
-            let q = self.apply_edge(q0, q1, EdgeOp::Mul);
-            z_children[i] = q.node;
-            z_weights[i] = q.weight;
+                z_children[i + j] = zij.node;
+                z_weights[i + j] = zij.weight;
+            }
         }
 
         let pivot = self.normalize_weights(&mut z_weights);
@@ -356,7 +380,8 @@ impl Qmdd {
             z_weights[i] = zi.weight;
         }
 
-        let pivot = self.normalize_weights(&mut z_weights);
+        let mut pivot = self.normalize_weights(&mut z_weights);
+        pivot = self.apply_weight(pivot, e0.weight, WeightOp::Mul);
         let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
         Edge {
             weight: pivot,
