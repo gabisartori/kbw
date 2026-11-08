@@ -138,13 +138,15 @@ impl Qmdd {
             node_index: HashMap::new(),
             weights: WeightTable::new(),
             edge_cache: HashMap::new(),
-            root: Edge {
-                weight: 1,
-                node: 0,
-            },
+            root: Edge { weight: 1, node: 0 },
         };
 
-        let identity_weights = [q.one_weight(), q.zero_weight(), q.zero_weight(), q.one_weight()];
+        let identity_weights = [
+            q.one_weight(),
+            q.zero_weight(),
+            q.zero_weight(),
+            q.one_weight(),
+        ];
         let mut root = Edge {
             weight: q.one_weight(),
             node: q.true_node,
@@ -159,21 +161,33 @@ impl Qmdd {
 
         q
     }
+
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
     /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
     fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [WeightId; 4]) -> NodeId {
-        let redundant = children.iter().zip(weights.iter()).all(|(child, w)| *child == children[0] && *w == weights[0]);
+        let redundant = children
+            .iter()
+            .zip(weights.iter())
+            .all(|(child, w)| *child == children[0] && *w == weights[0]);
         if redundant {
             return children[0];
         }
 
-        let key = Node { var, children, weights };
+        let key = Node {
+            var,
+            children,
+            weights,
+        };
         if let Some(&id) = self.node_index.get(&key) {
             return id;
         }
 
         let id = self.nodes.len();
-        self.nodes.push(Node { var, children, weights });
+        self.nodes.push(Node {
+            var,
+            children,
+            weights,
+        });
         self.node_index.insert(key, id);
         id
     }
@@ -415,7 +429,6 @@ impl Qmdd {
     /// Convert a 4x4 matrix of complex numbers to a 4-element array of WeightId
     /// It checks whether the desired weights are already present in the weight table and reuses them if possible, otherwise it inserts new weights.
     fn matrix_to_weights(&mut self, matrix: &[Complex; 4]) -> [WeightId; 4] {
-
         let mut weights = [self.zero_weight(); 4];
         for idx in 0..4 {
             if matrix[idx] != Complex::zero() {
@@ -441,7 +454,9 @@ impl Qmdd {
         let mut controls = gate.controls.clone();
         controls.sort_unstable();
         controls.dedup();
-        debug_assert!(controls.iter().all(|&c| c < self.num_vars && c != gate.target));
+        debug_assert!(controls
+            .iter()
+            .all(|&c| c < self.num_vars && c != gate.target));
 
         let identity_weights = [
             self.one_weight(),
@@ -557,18 +572,18 @@ impl Qmdd {
                 let next_edge = self.get_ei(current_edge, child_index);
                 value = value.mul(self.weights.get(next_edge.weight));
 
-                if current_edge.node == self.true_node { break; }
-                
+                if current_edge.node == self.true_node {
+                    break;
+                }
+
                 current_edge = next_edge;
                 current_node = &self.nodes[current_edge.node];
-
             }
 
             state[basis] = value;
         }
         state
     }
-
 }
 
 /// A struct representing a quantum gate, including its control qubits, target qubits, and the corresponding matrix representation.
@@ -588,7 +603,6 @@ impl Gate {
         }
     }
 }
-
 
 // Predefined matrices used by Ket's quantum execution interface.
 const PAULI_X_MATRIX: [Complex; 4] = [
@@ -624,37 +638,70 @@ fn phase_matrix(lambda: f64) -> [Complex; 4] {
         Complex { re: 1.0, im: 0.0 },
         Complex { re: 0.0, im: 0.0 },
         Complex { re: 0.0, im: 0.0 },
-        Complex { re: lambda.cos(), im: lambda.sin() },
+        Complex {
+            re: lambda.cos(),
+            im: lambda.sin(),
+        },
     ]
 }
 
 fn rx_matrix(theta: f64) -> [Complex; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex { re: half_theta.cos(), im: 0.0 },
-        Complex { re: 0.0, im: -half_theta.sin() },
-        Complex { re: 0.0, im: -half_theta.sin() },
-        Complex { re: half_theta.cos(), im: 0.0 },
+        Complex {
+            re: half_theta.cos(),
+            im: 0.0,
+        },
+        Complex {
+            re: 0.0,
+            im: -half_theta.sin(),
+        },
+        Complex {
+            re: 0.0,
+            im: -half_theta.sin(),
+        },
+        Complex {
+            re: half_theta.cos(),
+            im: 0.0,
+        },
     ]
 }
 
 fn ry_matrix(theta: f64) -> [Complex; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex { re: half_theta.cos(), im: 0.0 },
-        Complex { re: -half_theta.sin(), im: 0.0 },
-        Complex { re: half_theta.sin(), im: 0.0 },
-        Complex { re: half_theta.cos(), im: 0.0 },
+        Complex {
+            re: half_theta.cos(),
+            im: 0.0,
+        },
+        Complex {
+            re: -half_theta.sin(),
+            im: 0.0,
+        },
+        Complex {
+            re: half_theta.sin(),
+            im: 0.0,
+        },
+        Complex {
+            re: half_theta.cos(),
+            im: 0.0,
+        },
     ]
 }
 
 fn rz_matrix(theta: f64) -> [Complex; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex { re: half_theta.cos(), im: -half_theta.sin() },
+        Complex {
+            re: half_theta.cos(),
+            im: -half_theta.sin(),
+        },
         Complex { re: 0.0, im: 0.0 },
         Complex { re: 0.0, im: 0.0 },
-        Complex { re: half_theta.cos(), im: half_theta.sin() },
+        Complex {
+            re: half_theta.cos(),
+            im: half_theta.sin(),
+        },
     ]
 }
 
@@ -663,14 +710,37 @@ impl QuantumExecution for Qmdd {
         Ok(Self::new(num_qubits))
     }
     // Gates
-    fn pauli_x(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_X_MATRIX)); }
-    fn pauli_y(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Y_MATRIX)); }
-    fn pauli_z(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Z_MATRIX)); }
-    fn hadamard(&mut self, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, HADAMARD_MATRIX)); }
-    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, phase_matrix(lambda))); }
-    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, rx_matrix(theta))); }
-    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, ry_matrix(theta))); }
-    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) { self.apply_gate(Gate::new(control.to_vec(), target, rz_matrix(theta))); }
+    fn pauli_x(&mut self, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, PAULI_X_MATRIX));
+    }
+
+    fn pauli_y(&mut self, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Y_MATRIX));
+    }
+
+    fn pauli_z(&mut self, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, PAULI_Z_MATRIX));
+    }
+
+    fn hadamard(&mut self, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, HADAMARD_MATRIX));
+    }
+
+    fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, phase_matrix(lambda)));
+    }
+
+    fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, rx_matrix(theta)));
+    }
+
+    fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, ry_matrix(theta)));
+    }
+
+    fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
+        self.apply_gate(Gate::new(control.to_vec(), target, rz_matrix(theta)));
+    }
 
     // Measurements
     fn measure_p1(&mut self, target: usize) -> f64 {
@@ -682,7 +752,12 @@ impl QuantumExecution for Qmdd {
         projected
             .basis_states
             .iter()
-            .zip(projected.amplitudes_real.iter().zip(projected.amplitudes_imag.iter()))
+            .zip(
+                projected
+                    .amplitudes_real
+                    .iter()
+                    .zip(projected.amplitudes_imag.iter()),
+            )
             .filter(|(basis, _)| basis.first().copied().unwrap_or(0) == 1)
             .map(|(_, (re, im))| re * re + im * im)
             .sum()
@@ -728,7 +803,6 @@ impl QuantumExecution for Qmdd {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,8 +818,14 @@ mod tests {
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
-            assert!((actual.re - expected.re).abs() < 1e-12, "unexpected real component: {actual:?} != {expected:?}");
-            assert!((actual.im - expected.im).abs() < 1e-12, "unexpected imaginary component: {actual:?} != {expected:?}");
+            assert!(
+                (actual.re - expected.re).abs() < 1e-12,
+                "unexpected real component: {actual:?} != {expected:?}"
+            );
+            assert!(
+                (actual.im - expected.im).abs() < 1e-12,
+                "unexpected imaginary component: {actual:?} != {expected:?}"
+            );
         }
     }
 
@@ -763,8 +843,14 @@ mod tests {
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
-            assert!((actual.re - expected.re).abs() < 1e-12, "unexpected real component: {actual:?} != {expected:?}");
-            assert!((actual.im - expected.im).abs() < 1e-12, "unexpected imaginary component: {actual:?} != {expected:?}");
+            assert!(
+                (actual.re - expected.re).abs() < 1e-12,
+                "unexpected real component: {actual:?} != {expected:?}"
+            );
+            assert!(
+                (actual.im - expected.im).abs() < 1e-12,
+                "unexpected imaginary component: {actual:?} != {expected:?}"
+            );
         }
     }
 
@@ -782,9 +868,14 @@ mod tests {
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
-            assert!((actual.re - expected.re).abs() < 1e-12, "unexpected real component: {actual:?} != {expected:?}");
-            assert!((actual.im - expected.im).abs() < 1e-12, "unexpected imaginary component: {actual:?} != {expected:?}");
+            assert!(
+                (actual.re - expected.re).abs() < 1e-12,
+                "unexpected real component: {actual:?} != {expected:?}"
+            );
+            assert!(
+                (actual.im - expected.im).abs() < 1e-12,
+                "unexpected imaginary component: {actual:?} != {expected:?}"
+            );
         }
     }
-
 }
