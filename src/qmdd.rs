@@ -5,6 +5,7 @@ use ket::error::KetError;
 use ket::execution::DumpData;
 
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 type NodeId = usize;
 type WeightId = usize;
@@ -61,7 +62,7 @@ struct Edge {
 }
 
 /// A node in the QMDD, holding a variable and its four outgoing edges
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct Node {
     var: usize,
     children: [NodeId; 4],
@@ -116,7 +117,8 @@ enum WeightOp {
 pub struct Qmdd {
     num_vars: usize,
     true_node: NodeId,
-    nodes: Vec<Node>,
+    nodes: BTreeMap<NodeId, Node>,
+    node_counter: NodeId,
     node_index: HashMap<Node, NodeId>,
     weights: WeightTable,
     edge_cache: HashMap<(Edge, Edge, EdgeOp), Edge>,
@@ -130,11 +132,8 @@ impl Qmdd {
             num_vars,
             true_node: 0,
             // Terminal node points to itself since it'll never actually be followed
-            nodes: vec![Node {
-                var: num_vars,
-                children: [0; 4],
-                weights: [1; 4],
-            }],
+            nodes: BTreeMap::new(),
+            node_counter: 1,
             node_index: HashMap::new(),
             weights: WeightTable::new(),
             edge_cache: HashMap::new(),
@@ -147,6 +146,13 @@ impl Qmdd {
             q.zero_weight(),
             q.one_weight(),
         ];
+
+        q.nodes.insert(0, Node {
+            var: num_vars,
+            children: [0; 4],
+            weights: [1; 4],
+        });
+
         let mut root = Edge {
             weight: q.one_weight(),
             node: q.true_node,
@@ -182,8 +188,9 @@ impl Qmdd {
             return id;
         }
 
-        let id = self.nodes.len();
-        self.nodes.push(Node {
+        let id = self.node_counter;
+        self.node_counter += 1;
+        self.nodes.insert(id, Node {
             var,
             children,
             weights,
@@ -202,15 +209,15 @@ impl Qmdd {
     }
 
     fn node_var(&self, node: NodeId) -> usize {
-        self.nodes[node].var
+        self.nodes.get(&node).unwrap().var
     }
 
     fn child(&self, node: NodeId, idx: usize) -> NodeId {
-        self.nodes[node].children[idx]
+        self.nodes.get(&node).unwrap().children[idx]
     }
 
     fn weight_at(&self, node: NodeId, idx: usize) -> WeightId {
-        self.nodes[node].weights[idx]
+        self.nodes.get(&node).unwrap().weights[idx]
     }
 
     fn edge_is_terminal(&self, e: Edge) -> bool {
@@ -564,7 +571,7 @@ impl Qmdd {
         for basis in 0..dim {
             let mut value = self.weights.get(self.root.weight);
             let mut current_edge = self.root;
-            let mut current_node = &self.nodes[current_edge.node];
+            let mut current_node = self.nodes.get(&current_edge.node).unwrap();
             loop {
                 let bit = current_node.var;
                 let bit_index = (basis >> bit) & 1;
@@ -577,12 +584,36 @@ impl Qmdd {
                 }
 
                 current_edge = next_edge;
-                current_node = &self.nodes[current_edge.node];
+                current_node = self.nodes.get(&current_edge.node).unwrap();
             }
 
             state[basis] = value;
         }
         state
+    }
+
+    #[cfg(test)]
+    fn traverse(&self) -> usize {
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = vec![self.root.node];
+        let mut count = 0;
+        loop {
+            if let Some(node_id) = stack.pop() {
+                if !visited.insert(node_id) {
+                    continue;
+                }
+                count += 1;
+                let node = self.nodes.get(&node_id).unwrap();
+                for &child in &node.children {
+                    if child != self.true_node {
+                        stack.push(child);
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        count
     }
 }
 
@@ -877,5 +908,17 @@ mod tests {
                 "unexpected imaginary component: {actual:?} != {expected:?}"
             );
         }
+    }
+
+    #[test]
+    fn node_counter_test() {
+        let mut sim = Qmdd::new(10);
+        sim.hadamard(0, &[]);
+        sim.pauli_x(1, &[0]);
+        // sim.hadamard(1, &[]);
+        let state = sim.dump(&[0, 1]);
+        println!("Number of nodes used: {}", sim.node_counter);
+        println!("Used number of nodes: {}", sim.traverse());
+        println!("Dumped state: {:?}", state);
     }
 }
