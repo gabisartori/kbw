@@ -169,24 +169,46 @@ impl Qmdd {
         q
     }
 
-    /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
-    /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
-    fn make_node(&mut self, var: usize, edges: [Edge; 4]) -> NodeId {
+    /// Creates a new node in the QMDD with the given variable and edges.
+    /// Returns an Edge pointing to the normalized and trivialized node.
+    /// This means, if the desired node is redundant (all edges are the same), it will return an edge to its child node instead.
+    /// Also, the weights will be normalized before checking for existing nodes.
+    fn make_node(&mut self, var: usize, edges: [Edge; 4]) -> Edge {
         // Return the child node if all edges are the same, to avoid redundancy.
+        // This also catches the case where all edges are zero.
         if edges.iter().all(|edge| *edge == edges[0]) {
-            return edges[0].node;
+            return edges[0];
         }
+
+        // Normalize the weights of the edges, returning the pivot value and the new edges.
+        let pivot_idx = edges.iter().position(|e| e.weight != COMPLEX_ZERO)
+            .expect("All zero edges should have been handled by redundancy check");
+        let pivot = edges[pivot_idx].weight;
+        let mut new_edges = edges.map(|mut e| {
+            if e.weight != COMPLEX_ZERO {
+                e.weight = e.weight / pivot;
+            }
+            e
+        });
+        new_edges[pivot_idx].weight = COMPLEX_ONE;
 
         // If node already exists in the graph, return its id
         for (node_id, node) in self.nodes.iter().enumerate() {
-            if node.var == var && node.edges == edges {
-                return node_id;
+            if node.var == var && node.edges == new_edges {
+                return Edge {
+                    weight: pivot,
+                    node: node_id
+                };
             }
         }
 
-        // Create new node
-        self.nodes.push(Node { var, edges });
-        self.nodes.len() - 1
+        // Create new node if it doesn't exist yet
+        self.nodes.push(Node { var, edges: new_edges });
+
+        Edge {
+            weight: pivot,
+            node: self.nodes.len() - 1,
+        }
     }
 
     fn zero_edge(&self) -> Edge {
@@ -219,22 +241,7 @@ impl Qmdd {
         }
     }
 
-    fn normalize_weights(&mut self, edges: &mut [Edge; 4]) -> Complex<f64> {
-        if let Some(pivot_idx) = edges.iter().position(|e| e.weight != COMPLEX_ZERO) {
-            let pivot = edges[pivot_idx].weight;
-            for e in edges.iter_mut() {
-                if e.weight != COMPLEX_ZERO {
-                    e.weight = e.weight / pivot;
-                }
-            }
-            edges[pivot_idx].weight = COMPLEX_ONE;
-            pivot
-        } else {
-            COMPLEX_ZERO
-        }
-    }
-
-    /// Algorithm for applying edges, described in section 3.3.3
+    /// Algorithm for adding edges, described in section 3.3.3
     fn add_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         // Swap e0 with e1 if e1 is terminal
         let (e0, e1) = if self.edge_is_terminal(e1) {
@@ -261,31 +268,19 @@ impl Qmdd {
         }; 4];
 
         for i in 0..4 {
-            let ei0 = self.get_ei(e0, i);
-            let q0 = Edge {
-                weight: e0.weight * ei0.weight,
-                node: ei0.node,
+            let p = Edge {
+                weight: e0.weight * self.get_ei(e0, i).weight,
+                node: self.get_ei(e0, i).node,
             };
 
-            let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
-                let ei1 = self.get_ei(e1, i);
-                Edge {
-                    weight: e1.weight * ei1.weight,
-                    node: ei1.node,
-                }
-            } else {
-                e1
+            let q = Edge {
+                weight: e1.weight * self.get_ei(e1, i).weight,
+                node: self.get_ei(e1, i).node,
             };
-
-            z[i] = self.add_edge(q0, q1);
+            z[i] = self.add_edge(p, q);
         }
 
-        let pivot = self.normalize_weights(&mut z);
-        let new_node = self.make_node(self.node_var(e0.node), z);
-        Edge {
-            weight: pivot,
-            node: new_node,
-        }
+        self.make_node(self.node_var(e0.node), z)
     }
 
     /// Algorithm for multiplying edges, described in section 3.3.4
@@ -341,12 +336,7 @@ impl Qmdd {
             }
         }
 
-        let pivot = self.normalize_weights(&mut z);
-        let new_node = self.make_node(self.node_var(e0.node), z);
-        Edge {
-            weight: pivot,
-            node: new_node,
-        }
+        self.make_node(self.node_var(e0.node), z)
     }
 
     /// Algorithm for Kronecker product of edges, described in section 3.3.5.1
@@ -370,13 +360,13 @@ impl Qmdd {
             z[i] = self.kro_edge(self.get_ei(e0, i), e1);
         }
 
-        let mut pivot = self.normalize_weights(&mut z);
-        pivot = pivot * e0.weight;
-        let new_node = self.make_node(self.node_var(e0.node), z);
-        Edge {
-            weight: pivot,
-            node: new_node,
-        }
+        // Specifically in the kronecker product
+        // the weight of the resulting edge needs to be multiplied by the weight of the first edge of the operation
+        // This could also be done in the recursive calls, multiplying the children weights by the first edge weight
+        // But since this feels like an edge case, I'll have it explicit in here so it's easier to keep track off
+        let mut e = self.make_node(self.node_var(e0.node), z);
+        e.weight = e.weight * e0.weight;
+        e
     }
 
     /// Interface for applying an arbitrary quantum gate to the current QMDD, updating the root edge accordingly
@@ -391,10 +381,7 @@ impl Qmdd {
             weight: w,
             node: self.true_node,
         });
-        Edge {
-            weight: COMPLEX_ONE,
-            node: self.make_node(var, edges)
-        }
+        self.make_node(var, edges)
     }
 
     /// Resuses logic from the paper to build a controlled gate edge from a given gate, which can then be applied to the QMDD.
