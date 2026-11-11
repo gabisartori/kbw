@@ -132,7 +132,7 @@ struct Node {
 #[derive(Clone, Debug)]
 pub struct Qmdd {
     num_vars: usize,
-    true_node: NodeId,
+    terminal_node: NodeId,
     nodes: Vec<Node>,
     root: Edge,
 }
@@ -142,7 +142,7 @@ impl Qmdd {
     fn new(num_vars: usize) -> Self {
         let mut q = Self {
             num_vars,
-            true_node: 0,
+            terminal_node: 0,
             // Terminal node points to itself since it'll never actually be followed
             nodes: vec![Node {
                 var: num_vars,
@@ -156,7 +156,7 @@ impl Qmdd {
 
         let mut root = Edge {
             weight: COMPLEX_ONE,
-            node: q.true_node,
+            node: q.terminal_node,
         };
 
         // Build the n-qubit identity operator as a Kronecker chain.
@@ -193,6 +193,7 @@ impl Qmdd {
         new_edges[pivot_idx].weight = COMPLEX_ONE;
 
         // If node already exists in the graph, return its id
+        // TODO: Commenting out this section makes it obvious that there is a problem with traversal.
         for (node_id, node) in self.nodes.iter().enumerate() {
             if node.var == var && node.edges == new_edges {
                 return Edge {
@@ -214,7 +215,7 @@ impl Qmdd {
     fn zero_edge(&self) -> Edge {
         Edge {
             weight: COMPLEX_ZERO,
-            node: self.true_node
+            node: self.terminal_node
         }
     }
 
@@ -231,7 +232,7 @@ impl Qmdd {
     }
 
     fn edge_is_terminal(&self, e: Edge) -> bool {
-        e.node == self.true_node
+        e.node == self.terminal_node
     }
 
     fn get_ei(&self, e: Edge, idx: usize) -> Edge {
@@ -257,15 +258,12 @@ impl Qmdd {
             if self.edge_is_terminal(e1) {
                 return Edge {
                     weight: e0.weight + e1.weight,
-                    node: self.true_node,
+                    node: self.terminal_node,
                 };
             }
         }
 
-        let mut z = [Edge{
-            weight: COMPLEX_ZERO,
-            node: self.true_node,
-        }; 4];
+        let mut z = [self.zero_edge(); 4];
 
         for i in 0..4 {
             let p = Edge {
@@ -302,15 +300,12 @@ impl Qmdd {
             return self.mul_edge(e1, e0);
         }
 
-        let mut z = [Edge { weight: COMPLEX_ZERO, node: self.true_node}; 4];
+        let mut z = [self.zero_edge(); 4];
 
         // 2x2 block-matrix multiplication across quadrants.
         for i in (0..4).step_by(2) {
             for j in 0..2 {
-                let mut zij = Edge {
-                    weight: COMPLEX_ZERO,
-                    node: self.true_node,
-                };
+                let mut zij = self.zero_edge();
 
                 for k in 0..2 {
                     let ei0 = self.get_ei(e0, i + k);
@@ -354,7 +349,7 @@ impl Qmdd {
             };
         }
 
-        let mut z = [Edge { weight: COMPLEX_ZERO, node: self.true_node}; 4];
+        let mut z = [self.zero_edge(); 4];
 
         for i in 0..4 {
             z[i] = self.kro_edge(self.get_ei(e0, i), e1);
@@ -379,7 +374,7 @@ impl Qmdd {
     fn local_operator_edge(&mut self, var: usize, weights: [Complex<f64>; 4]) -> Edge {
         let edges = weights.map(|w| Edge {
             weight: w,
-            node: self.true_node,
+            node: self.terminal_node,
         });
         self.make_node(var, edges)
     }
@@ -398,7 +393,7 @@ impl Qmdd {
         let mut identity_subtree = vec![
             Edge {
                 weight: COMPLEX_ONE,
-                node: self.true_node,
+                node: self.terminal_node,
             };
             self.num_vars + 1
         ];
@@ -410,12 +405,9 @@ impl Qmdd {
 
         let mut active_gate = Edge {
             weight: COMPLEX_ONE,
-            node: self.true_node,
+            node: self.terminal_node,
         };
-        let mut inactive_gate = Edge {
-            weight: COMPLEX_ZERO,
-            node: self.true_node,
-        };
+        let mut inactive_gate = self.zero_edge();
 
         let mut next_control = controls.len();
 
@@ -474,7 +466,7 @@ impl Qmdd {
         let dim = 1usize << self.num_vars;
         let mut state = vec![COMPLEX_ZERO; dim];
 
-        if self.root.node == self.true_node {
+        if self.root.node == self.terminal_node {
             state[0] = self.root.weight;
             return state;
         }
@@ -490,7 +482,7 @@ impl Qmdd {
                 // TODO: Impl MulAssign
                 value = value * next_edge.weight;
 
-                if current_edge.node == self.true_node {
+                if current_edge.node == self.terminal_node {
                     break;
                 }
 
@@ -516,7 +508,7 @@ impl Qmdd {
                 count += 1;
                 let node = &self.nodes[node_id];
                 for &edge in &node.edges {
-                    if edge.node != self.true_node {
+                    if edge.node != self.terminal_node {
                         stack.push(edge.node);
                     }
                 }
@@ -756,11 +748,9 @@ mod tests {
         sim.pauli_x(1, &[0]);
         let p1 = sim.measure_p1(0);
         let p = 1.0/p1.sqrt();
-        println!("Probability of measuring 1 on qubit 0: {p1:?}");
         assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
         sim.measure_collapse(0, true, p);
         let p1 = sim.measure_p1(1);
         assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
-        println!("Reconstructed state: {:?}", sim.reconstruct_state());
     }
 }
