@@ -4,115 +4,26 @@ use crate::quantum_execution::QuantumExecution;
 use ket::error::KetError;
 use ket::execution::DumpData;
 
+use num::complex::Complex;
+
+const COMPLEX_ZERO: Complex<f64> = Complex { re: 0.0, im: 0.0 };
+const COMPLEX_ONE: Complex<f64> = Complex { re: 1.0, im: 0.0 };
+
 type NodeId = usize;
-
-// A simple complex number struct to represent the weights in the QMDD.
-// TODO: real and imaginary parts should be represented as sqrt(2)-extended rational numbers so they can be better hashed.
-#[derive(Clone, Copy, Debug)]
-struct Complex {
-    re: f64,
-    im: f64,
-}
-
-impl Complex {
-    fn new(re: f64, im: f64) -> Self {
-        Self { re, im }
-    }
-
-    fn zero() -> Self {
-        Self::new(0.0, 0.0)
-    }
-
-    fn one() -> Self {
-        Self::new(1.0, 0.0)
-    }
-
-    fn abs(self) -> f64 {
-        (self.re * self.re + self.im * self.im).sqrt()
-    }
-}
-
-impl std::ops::Add for Complex {
-    type Output = Complex;
-    
-    fn add(self, other: Complex) -> Complex {
-        Complex {
-            re: self.re + other.re,
-            im: self.im + other.im,
-        }
-    }
-}
-
-impl std::ops::Sub for Complex {
-    type Output = Complex;
-    
-    fn sub(self, other: Complex) -> Complex {
-        Complex {
-            re: self.re - other.re,
-            im: self.im - other.im,
-        }
-    }
-}
-
-impl std::ops::Neg for Complex {
-    type Output = Complex;
-    
-    fn neg(self) -> Complex {
-        Complex {
-            re: -self.re,
-            im: -self.im,
-        }
-    }
-}
-
-impl std::ops::Mul for Complex {
-    type Output = Complex;
-    
-    fn mul(self, other: Complex) -> Complex {
-        Complex {
-            re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im * other.re,
-        }
-    }
-}
-
-impl std::ops::Div for Complex {
-    type Output = Complex;
-    
-    fn div(self, other: Complex) -> Complex {
-        let denom = other.re * other.re + other.im * other.im;
-        if denom == 0.0 {
-            panic!("division by zero complex number");
-        }
-        Complex {
-            re: (self.re * other.re + self.im * other.im) / denom,
-            im: (self.im * other.re - self.re * other.im) / denom,
-        }
-    }
-}
-
-
-impl std::cmp::PartialEq for Complex {
-    fn eq(&self, other: &Self) -> bool {
-        (*self - *other).abs() < 1e-12
-    }
-}
-
-impl std::cmp::Eq for Complex { }
 
 /// An edge in the QMDD, holding a weight and its target node
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Edge {
-    weight: Complex,
+    weight: Complex<f64>,
     node: NodeId,
 }
 
 /// A node in the QMDD, holding a variable and its four outgoing edges
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Node {
     var: usize,
     children: [NodeId; 4],
-    weights: [Complex; 4],
+    weights: [Complex<f64>; 4],
 }
 
 #[derive(Clone, Debug)]
@@ -133,9 +44,9 @@ impl Qmdd {
             nodes: vec![Node {
                 var: num_vars,
                 children: [0; 4],
-                weights: [Complex::one(); 4]
+                weights: [COMPLEX_ONE; 4]
             }],
-            root: Edge { weight: Complex::one(), node: 0 },
+            root: Edge { weight: COMPLEX_ONE, node: 0 },
         };
 
         let identity_weights = [
@@ -162,7 +73,7 @@ impl Qmdd {
 
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
     /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
-    fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [Complex; 4]) -> NodeId {
+    fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [Complex<f64>; 4]) -> NodeId {
         let redundant = children
             .iter()
             .zip(weights.iter())
@@ -181,12 +92,12 @@ impl Qmdd {
     }
 
     // Fundamental functions for QMDD operations, as described in section 3.3.1
-    fn zero_weight(&self) -> Complex {
-        Complex::zero()
+    fn zero_weight(&self) -> Complex<f64> {
+        COMPLEX_ZERO
     }
 
-    fn one_weight(&self) -> Complex {
-        Complex::one()
+    fn one_weight(&self) -> Complex<f64> {
+        COMPLEX_ONE
     }
 
     fn node_var(&self, node: NodeId) -> usize {
@@ -197,7 +108,7 @@ impl Qmdd {
         self.nodes[node].children[idx]
     }
 
-    fn weight_at(&self, node: NodeId, idx: usize) -> Complex {
+    fn weight_at(&self, node: NodeId, idx: usize) -> Complex<f64> {
         self.nodes[node].weights[idx]
     }
 
@@ -214,7 +125,7 @@ impl Qmdd {
 
     /// Algorithm for normalizing weights, described in section 3.3.2
     /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
-    fn normalize_weights(&mut self, weights: &mut [Complex; 4]) -> Complex {
+    fn normalize_weights(&mut self, weights: &mut [Complex<f64>; 4]) -> Complex<f64> {
         let zero = self.zero_weight();
         let pivot_idx = weights.iter().position(|w| *w != zero);
         let Some(pivot_idx) = pivot_idx else {
@@ -386,7 +297,7 @@ impl Qmdd {
     }
 
     // TODO: Not sure what this does
-    fn local_operator_edge(&mut self, var: usize, weights: [Complex; 4]) -> Edge {
+    fn local_operator_edge(&mut self, var: usize, weights: [Complex<f64>; 4]) -> Edge {
         let children = [self.true_node; 4];
         Edge {
             weight: self.one_weight(),
@@ -499,9 +410,9 @@ impl Qmdd {
     /// corresponding to the bit value of each qubit. The chosen path multiplies
     /// the root weight by every traversed edge weight until the terminal node is
     /// reached.
-    fn reconstruct_state(&self) -> Vec<Complex> {
+    fn reconstruct_state(&self) -> Vec<Complex<f64>> {
         let dim = 1usize << self.num_vars;
-        let mut state = vec![Complex::zero(); dim];
+        let mut state = vec![COMPLEX_ZERO; dim];
 
         if self.root.node == self.true_node {
             state[0] = self.root.weight;
@@ -562,11 +473,11 @@ impl Qmdd {
 struct Gate {
     controls: Vec<usize>,
     target: usize,
-    matrix: [Complex; 4],
+    matrix: [Complex<f64>; 4],
 }
 
 impl Gate {
-    fn new(controls: Vec<usize>, target: usize, matrix: [Complex; 4]) -> Self {
+    fn new(controls: Vec<usize>, target: usize, matrix: [Complex<f64>; 4]) -> Self {
         Self {
             controls,
             target,
@@ -576,114 +487,114 @@ impl Gate {
 }
 
 // Predefined matrices used by Ket's quantum execution interface.
-const PAULI_X_MATRIX: [Complex; 4] = [
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 1.0, im: 0.0 },
-    Complex { re: 1.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
+const PAULI_X_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
 ];
 
-const PAULI_Y_MATRIX: [Complex; 4] = [
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: -1.0 },
-    Complex { re: 0.0, im: 1.0 },
-    Complex { re: 0.0, im: 0.0 },
+const PAULI_Y_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: -1.0 },
+    Complex::<f64> { re: 0.0, im: 1.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
 ];
 
-const PAULI_Z_MATRIX: [Complex; 4] = [
-    Complex { re: 1.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: -1.0, im: 0.0 },
+const PAULI_Z_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: -1.0, im: 0.0 },
 ];
 
-const HADAMARD_MATRIX: [Complex; 4] = [
-    Complex { re: 0.7071067811865476, im: 0.0 },
-    Complex { re: 0.7071067811865476, im: 0.0 },
-    Complex { re: 0.7071067811865476, im: 0.0 },
-    Complex { re: -0.7071067811865476, im: 0.0 },
+const HADAMARD_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
+    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
+    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
+    Complex::<f64> { re: -0.7071067811865476, im: 0.0 },
 ];
 
-const M0_MATRIX: [Complex; 4] = [
-    Complex { re: 1.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 }
+const M0_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 }
 ];
 
-const M1_MATRIX: [Complex; 4] = [
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 0.0, im: 0.0 },
-    Complex { re: 1.0, im: 0.0 }
+const M1_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 }
 ];
 
-fn phase_matrix(lambda: f64) -> [Complex; 4] {
+fn phase_matrix(lambda: f64) -> [Complex<f64>; 4] {
     [
-        Complex { re: 1.0, im: 0.0 },
-        Complex { re: 0.0, im: 0.0 },
-        Complex { re: 0.0, im: 0.0 },
-        Complex {
+        Complex::<f64> { re: 1.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> {
             re: lambda.cos(),
             im: lambda.sin(),
         },
     ]
 }
 
-fn rx_matrix(theta: f64) -> [Complex; 4] {
+fn rx_matrix(theta: f64) -> [Complex<f64>; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex {
+        Complex::<f64> {
             re: half_theta.cos(),
             im: 0.0,
         },
-        Complex {
+        Complex::<f64> {
             re: 0.0,
             im: -half_theta.sin(),
         },
-        Complex {
+        Complex::<f64> {
             re: 0.0,
             im: -half_theta.sin(),
         },
-        Complex {
+        Complex::<f64> {
             re: half_theta.cos(),
             im: 0.0,
         },
     ]
 }
 
-fn ry_matrix(theta: f64) -> [Complex; 4] {
+fn ry_matrix(theta: f64) -> [Complex<f64>; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex {
+        Complex::<f64> {
             re: half_theta.cos(),
             im: 0.0,
         },
-        Complex {
+        Complex::<f64> {
             re: -half_theta.sin(),
             im: 0.0,
         },
-        Complex {
+        Complex::<f64> {
             re: half_theta.sin(),
             im: 0.0,
         },
-        Complex {
+        Complex::<f64> {
             re: half_theta.cos(),
             im: 0.0,
         },
     ]
 }
 
-fn rz_matrix(theta: f64) -> [Complex; 4] {
+fn rz_matrix(theta: f64) -> [Complex<f64>; 4] {
     let half_theta = theta / 2.0;
     [
-        Complex {
+        Complex::<f64> {
             re: half_theta.cos(),
             im: -half_theta.sin(),
         },
-        Complex { re: 0.0, im: 0.0 },
-        Complex { re: 0.0, im: 0.0 },
-        Complex {
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> {
             re: half_theta.cos(),
             im: half_theta.sin(),
         },
@@ -753,7 +664,7 @@ impl QuantumExecution for Qmdd {
         let gate = Gate::new(vec![], target, matrix);
         let e = self.build_controlled_gate_edge(&gate);
         self.root = self.mul_edge(e, self.root);
-        self.root.weight = self.root.weight / Complex::new(p.sqrt(), 0.0);
+        self.root.weight = self.root.weight / Complex::<f64>::new(p.sqrt(), 0.0);
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
@@ -803,8 +714,8 @@ mod tests {
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
@@ -826,10 +737,10 @@ mod tests {
         sim.hadamard(1, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::new(0.5, 0.0),
-            Complex::new(0.5, 0.0),
-            Complex::new(0.5, 0.0),
-            Complex::new(0.5, 0.0),
+            Complex::<f64>::new(0.5, 0.0),
+            Complex::<f64>::new(0.5, 0.0),
+            Complex::<f64>::new(0.5, 0.0),
+            Complex::<f64>::new(0.5, 0.0),
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
@@ -851,10 +762,10 @@ mod tests {
         sim.pauli_x(1, &[0]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::zero(),
-            Complex::zero(),
-            Complex::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
