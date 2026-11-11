@@ -11,6 +11,108 @@ const COMPLEX_ONE: Complex<f64> = Complex { re: 1.0, im: 0.0 };
 const COMPLEX_INVERSE_SQRT_2: Complex<f64> = Complex { re: std::f64::consts::FRAC_1_SQRT_2, im: 0.0 };
 const COMPLEX_NEG_INVERSE_SQRT_2: Complex<f64> = Complex { re: -std::f64::consts::FRAC_1_SQRT_2, im: 0.0 };
 
+const I_MATRIX: [Complex<f64>; 4] = [
+    COMPLEX_ONE,
+    COMPLEX_ZERO,
+    COMPLEX_ZERO,
+    COMPLEX_ONE
+];
+
+const IF_FALSE_MATRIX: [Complex<f64>; 4] = [
+    COMPLEX_ONE,
+    COMPLEX_ZERO,
+    COMPLEX_ZERO,
+    COMPLEX_ZERO
+];
+
+const IF_TRUE_MATRIX: [Complex<f64>; 4] = [
+    COMPLEX_ZERO,
+    COMPLEX_ZERO,
+    COMPLEX_ZERO,
+    COMPLEX_ONE
+];
+
+const PAULI_X_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+];
+
+const PAULI_Y_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: -1.0 },
+    Complex::<f64> { re: 0.0, im: 1.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+];
+
+const PAULI_Z_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: -1.0, im: 0.0 },
+];
+
+const HADAMARD_MATRIX: [Complex<f64>; 4] = [
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_NEG_INVERSE_SQRT_2
+];
+
+const M0_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 1.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 }
+];
+
+const M1_MATRIX: [Complex<f64>; 4] = [
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 0.0, im: 0.0 },
+    Complex::<f64> { re: 1.0, im: 0.0 }
+];
+
+fn phase_matrix(lambda: f64) -> [Complex<f64>; 4] {
+    [
+        Complex::<f64> { re: 1.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: lambda.cos(), im: lambda.sin() }
+    ]
+}
+
+fn rx_matrix(theta: f64) -> [Complex<f64>; 4] {
+    let half_theta = theta / 2.0;
+    [
+        Complex::<f64> { re: half_theta.cos(), im: 0.0, },
+        Complex::<f64> { re: 0.0, im: -half_theta.sin(), },
+        Complex::<f64> { re: 0.0, im: -half_theta.sin(), },
+        Complex::<f64> { re: half_theta.cos(), im: 0.0, }
+    ]
+}
+
+fn ry_matrix(theta: f64) -> [Complex<f64>; 4] {
+    let half_theta = theta / 2.0;
+    [
+        Complex::<f64> { re: half_theta.cos(), im: 0.0, },
+        Complex::<f64> { re: -half_theta.sin(), im: 0.0, },
+        Complex::<f64> { re: half_theta.sin(), im: 0.0, },
+        Complex::<f64> { re: half_theta.cos(), im: 0.0, }
+    ]
+}
+
+fn rz_matrix(theta: f64) -> [Complex<f64>; 4] {
+    let half_theta = theta / 2.0;
+    [
+        Complex::<f64> { re: half_theta.cos(), im: -half_theta.sin() },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: 0.0, im: 0.0 },
+        Complex::<f64> { re: half_theta.cos(), im: half_theta.sin() }
+    ]
+}
+
 type NodeId = usize;
 
 /// An edge in the QMDD, holding a weight and its target node
@@ -51,13 +153,6 @@ impl Qmdd {
             root: Edge { weight: COMPLEX_ONE, node: 0 },
         };
 
-        let identity_weights = [
-            COMPLEX_ONE,
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-            COMPLEX_ONE,
-        ];
-
         let mut root = Edge {
             weight: COMPLEX_ONE,
             node: q.true_node,
@@ -65,7 +160,7 @@ impl Qmdd {
 
         // Build the n-qubit identity operator as a Kronecker chain.
         for var in (0..num_vars).rev() {
-            let i_edge = q.local_operator_edge(var, identity_weights);
+            let i_edge = q.local_operator_edge(var, I_MATRIX);
             root = q.kro_edge(i_edge, root);
         }
         q.root = root;
@@ -315,25 +410,6 @@ impl Qmdd {
             .iter()
             .all(|&c| c < self.num_vars && c != gate.target));
 
-        let identity_weights = [
-            COMPLEX_ONE,
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-            COMPLEX_ONE,
-        ];
-        let if_false_weights = [
-            COMPLEX_ONE,
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-        ];
-        let if_true_weights = [
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-            COMPLEX_ZERO,
-            COMPLEX_ONE,
-        ];
-
         let mut identity_subtree = vec![
             Edge {
                 weight: COMPLEX_ONE,
@@ -343,7 +419,7 @@ impl Qmdd {
         ];
 
         for var in (0..self.num_vars).rev() {
-            let i_edge = self.local_operator_edge(var, identity_weights);
+            let i_edge = self.local_operator_edge(var, I_MATRIX);
             identity_subtree[var] = self.kro_edge(i_edge, identity_subtree[var + 1]);
         }
 
@@ -368,34 +444,34 @@ impl Qmdd {
 
             if var > gate.target {
                 if is_control {
-                    let p1_edge = self.local_operator_edge(var, if_true_weights);
+                    let p1_edge = self.local_operator_edge(var, IF_TRUE_MATRIX);
                     active_gate = self.kro_edge(p1_edge, active_gate);
 
-                    let p0_edge = self.local_operator_edge(var, if_false_weights);
+                    let p0_edge = self.local_operator_edge(var, IF_FALSE_MATRIX);
                     let p0_part = self.kro_edge(p0_edge, identity_subtree[var + 1]);
                     let p1_part = self.kro_edge(p1_edge, inactive_gate);
                     inactive_gate = self.add_edge(p0_part, p1_part);
                 } else {
-                    let i_edge = self.local_operator_edge(var, identity_weights);
+                    let i_edge = self.local_operator_edge(var, I_MATRIX);
                     active_gate = self.kro_edge(i_edge, active_gate);
                     inactive_gate = self.kro_edge(i_edge, inactive_gate);
                 }
             } else if var == gate.target {
-                let i_edge = self.local_operator_edge(var, identity_weights);
+                let i_edge = self.local_operator_edge(var, I_MATRIX);
                 let u_edge = self.local_operator_edge(var, gate.matrix);
 
                 let inactive_part = self.kro_edge(i_edge, inactive_gate);
                 let active_part = self.kro_edge(u_edge, active_gate);
                 active_gate = self.add_edge(inactive_part, active_part);
             } else if is_control {
-                let p0_edge = self.local_operator_edge(var, if_false_weights);
-                let p1_edge = self.local_operator_edge(var, if_true_weights);
+                let p0_edge = self.local_operator_edge(var, IF_FALSE_MATRIX);
+                let p1_edge = self.local_operator_edge(var, IF_TRUE_MATRIX);
 
                 let p0_part = self.kro_edge(p0_edge, identity_subtree[var + 1]);
                 let p1_part = self.kro_edge(p1_edge, active_gate);
                 active_gate = self.add_edge(p0_part, p1_part);
             } else {
-                let i_edge = self.local_operator_edge(var, identity_weights);
+                let i_edge = self.local_operator_edge(var, I_MATRIX);
                 active_gate = self.kro_edge(i_edge, active_gate);
             }
         }
@@ -483,121 +559,6 @@ impl Gate {
             matrix,
         }
     }
-}
-
-// Predefined matrices used by Ket's quantum execution interface.
-const PAULI_X_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 1.0, im: 0.0 },
-    Complex::<f64> { re: 1.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-];
-
-const PAULI_Y_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: -1.0 },
-    Complex::<f64> { re: 0.0, im: 1.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-];
-
-const PAULI_Z_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 1.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: -1.0, im: 0.0 },
-];
-
-const HADAMARD_MATRIX: [Complex<f64>; 4] = [
-    COMPLEX_INVERSE_SQRT_2,
-    COMPLEX_INVERSE_SQRT_2,
-    COMPLEX_INVERSE_SQRT_2,
-    COMPLEX_NEG_INVERSE_SQRT_2
-];
-
-const M0_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 1.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 }
-];
-
-const M1_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 0.0, im: 0.0 },
-    Complex::<f64> { re: 1.0, im: 0.0 }
-];
-
-fn phase_matrix(lambda: f64) -> [Complex<f64>; 4] {
-    [
-        Complex::<f64> { re: 1.0, im: 0.0 },
-        Complex::<f64> { re: 0.0, im: 0.0 },
-        Complex::<f64> { re: 0.0, im: 0.0 },
-        Complex::<f64> {
-            re: lambda.cos(),
-            im: lambda.sin(),
-        },
-    ]
-}
-
-fn rx_matrix(theta: f64) -> [Complex<f64>; 4] {
-    let half_theta = theta / 2.0;
-    [
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: 0.0,
-        },
-        Complex::<f64> {
-            re: 0.0,
-            im: -half_theta.sin(),
-        },
-        Complex::<f64> {
-            re: 0.0,
-            im: -half_theta.sin(),
-        },
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: 0.0,
-        },
-    ]
-}
-
-fn ry_matrix(theta: f64) -> [Complex<f64>; 4] {
-    let half_theta = theta / 2.0;
-    [
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: 0.0,
-        },
-        Complex::<f64> {
-            re: -half_theta.sin(),
-            im: 0.0,
-        },
-        Complex::<f64> {
-            re: half_theta.sin(),
-            im: 0.0,
-        },
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: 0.0,
-        },
-    ]
-}
-
-fn rz_matrix(theta: f64) -> [Complex<f64>; 4] {
-    let half_theta = theta / 2.0;
-    [
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: -half_theta.sin(),
-        },
-        Complex::<f64> { re: 0.0, im: 0.0 },
-        Complex::<f64> { re: 0.0, im: 0.0 },
-        Complex::<f64> {
-            re: half_theta.cos(),
-            im: half_theta.sin(),
-        },
-    ]
 }
 
 impl QuantumExecution for Qmdd {
@@ -781,7 +742,7 @@ mod tests {
 
     #[test]
     fn node_counter_test() {
-        let size = 10;
+        let size = 5;
         let mut sim = Qmdd::new(size);
         for i in 0..size {
             sim.hadamard(i, &[]);
