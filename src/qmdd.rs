@@ -126,8 +126,7 @@ struct Edge {
 #[derive(Clone, Debug, PartialEq)]
 struct Node {
     var: usize,
-    children: [NodeId; 4],
-    weights: [Complex<f64>; 4],
+    edges: [Edge; 4]
 }
 
 #[derive(Clone, Debug)]
@@ -147,8 +146,10 @@ impl Qmdd {
             // Terminal node points to itself since it'll never actually be followed
             nodes: vec![Node {
                 var: num_vars,
-                children: [0; 4],
-                weights: [COMPLEX_ONE; 4]
+                edges: [Edge {
+                    weight: COMPLEX_ONE,
+                    node: 0
+                }; 4],
             }],
             root: Edge { weight: COMPLEX_ONE, node: 0 },
         };
@@ -170,27 +171,22 @@ impl Qmdd {
 
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
     /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
-    fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [Complex<f64>; 4]) -> NodeId {
-        let redundant = children
+    fn make_node(&mut self, var: usize, edges: [Edge; 4]) -> NodeId {
+        let redundant = edges
             .iter()
-            .zip(weights.iter())
-            .all(|(child, w)| *child == children[0] && *w == weights[0]);
+            .all(|edge| *edge == edges[0]);
 
-            if redundant {
-            return children[0];
+        if redundant {
+            return edges[0].node
         }
 
         for (node_id, node) in self.nodes.iter().enumerate() {
-            if node.var == var && node.children == children && node.weights == weights {
+            if node.var == var && node.edges == edges {
                 return node_id;
             }
         }
 
-        self.nodes.push(Node {
-            var,
-            children,
-            weights,
-        });
+        self.nodes.push(Node { var, edges });
         self.nodes.len() - 1
     }
 
@@ -199,11 +195,11 @@ impl Qmdd {
     }
 
     fn child(&self, node: NodeId, idx: usize) -> NodeId {
-        self.nodes[node].children[idx]
+        self.nodes[node].edges[idx].node
     }
 
     fn weight_at(&self, node: NodeId, idx: usize) -> Complex<f64> {
-        self.nodes[node].weights[idx]
+        self.nodes[node].edges[idx].weight
     }
 
     fn edge_is_terminal(&self, e: Edge) -> bool {
@@ -219,21 +215,36 @@ impl Qmdd {
 
     /// Algorithm for normalizing weights, described in section 3.3.2
     /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
-    fn normalize_weights(&mut self, weights: &mut [Complex<f64>; 4]) -> Complex<f64> {
-        let zero = COMPLEX_ZERO;
-        let pivot_idx = weights.iter().position(|w| *w != zero);
-        let Some(pivot_idx) = pivot_idx else {
-            return zero;
-        };
+    // fn normalize_weights(&mut self, weights: &mut [Complex<f64>; 4]) -> Complex<f64> {
+    //     let zero = COMPLEX_ZERO;
+    //     let pivot_idx = weights.iter().position(|w| *w != zero);
+    //     let Some(pivot_idx) = pivot_idx else {
+    //         return zero;
+    //     };
 
-        let pivot = weights[pivot_idx];
-        for w in weights.iter_mut() {
-            if *w != zero {
-                *w = *w / pivot;
+    //     let pivot = weights[pivot_idx];
+    //     for w in weights.iter_mut() {
+    //         if *w != zero {
+    //             *w = *w / pivot;
+    //         }
+    //     }
+    //     weights[pivot_idx] = COMPLEX_ONE;
+    //     pivot
+    // }
+
+    fn normalize_weights(&mut self, edges: &mut [Edge; 4]) -> Complex<f64> {
+        if let Some(pivot_idx) = edges.iter().position(|e| e.weight != COMPLEX_ZERO) {
+            let pivot = edges[pivot_idx].weight;
+            for e in edges.iter_mut() {
+                if e.weight != COMPLEX_ZERO {
+                    e.weight = e.weight / pivot;
+                }
             }
+            edges[pivot_idx].weight = COMPLEX_ONE;
+            pivot
+        } else {
+            COMPLEX_ZERO
         }
-        weights[pivot_idx] = COMPLEX_ONE;
-        pivot
     }
 
     /// Algorithm for applying edges, described in section 3.3.3
@@ -254,8 +265,10 @@ impl Qmdd {
             return self.add_edge(e1, e0);
         }
 
-        let mut z_children = [self.true_node; 4];
-        let mut z_weights = [COMPLEX_ZERO; 4];
+        let mut z = [Edge{
+            weight: COMPLEX_ZERO,
+            node: self.true_node,
+        }; 4];
 
         for i in 0..4 {
             let ei0 = self.get_ei(e0, i);
@@ -274,13 +287,11 @@ impl Qmdd {
                 e1
             };
 
-            let zi = self.add_edge(q0, q1);
-            z_children[i] = zi.node;
-            z_weights[i] = zi.weight;
+            z[i] = self.add_edge(q0, q1);
         }
 
-        let pivot = self.normalize_weights(&mut z_weights);
-        let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
+        let pivot = self.normalize_weights(&mut z);
+        let new_node = self.make_node(self.node_var(e0.node), z);
         Edge {
             weight: pivot,
             node: new_node,
@@ -306,8 +317,7 @@ impl Qmdd {
             return self.mul_edge(e1, e0);
         }
 
-        let mut z_children = [self.true_node; 4];
-        let mut z_weights = [COMPLEX_ZERO; 4];
+        let mut z = [Edge { weight: COMPLEX_ZERO, node: self.true_node}; 4];
 
         // 2x2 block-matrix multiplication across quadrants.
         for i in (0..4).step_by(2) {
@@ -337,14 +347,12 @@ impl Qmdd {
                     let q0q1 = self.mul_edge(q0, q1);
                     zij = self.add_edge(zij, q0q1);
                 }
-
-                z_children[i + j] = zij.node;
-                z_weights[i + j] = zij.weight;
+                z[i+j] = zij;
             }
         }
 
-        let pivot = self.normalize_weights(&mut z_weights);
-        let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
+        let pivot = self.normalize_weights(&mut z);
+        let new_node = self.make_node(self.node_var(e0.node), z);
         Edge {
             weight: pivot,
             node: new_node,
@@ -366,18 +374,15 @@ impl Qmdd {
             };
         }
 
-        let mut z_children = [self.true_node; 4];
-        let mut z_weights = [COMPLEX_ZERO; 4];
+        let mut z = [Edge { weight: COMPLEX_ZERO, node: self.true_node}; 4];
 
         for i in 0..4 {
-            let zi = self.kro_edge(self.get_ei(e0, i), e1);
-            z_children[i] = zi.node;
-            z_weights[i] = zi.weight;
+            z[i] = self.kro_edge(self.get_ei(e0, i), e1);
         }
 
-        let mut pivot = self.normalize_weights(&mut z_weights);
+        let mut pivot = self.normalize_weights(&mut z);
         pivot = pivot * e0.weight;
-        let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
+        let new_node = self.make_node(self.node_var(e0.node), z);
         Edge {
             weight: pivot,
             node: new_node,
@@ -392,10 +397,13 @@ impl Qmdd {
 
     // TODO: Not sure what this does
     fn local_operator_edge(&mut self, var: usize, weights: [Complex<f64>; 4]) -> Edge {
-        let children = [self.true_node; 4];
+        let edges = weights.map(|w| Edge {
+            weight: w,
+            node: self.true_node,
+        });
         Edge {
             weight: COMPLEX_ONE,
-            node: self.make_node(var, children, weights),
+            node: self.make_node(var, edges)
         }
     }
 
@@ -530,9 +538,9 @@ impl Qmdd {
                 }
                 count += 1;
                 let node = &self.nodes[node_id];
-                for &child in &node.children {
-                    if child != self.true_node {
-                        stack.push(child);
+                for &edge in &node.edges {
+                    if edge.node != self.true_node {
+                        stack.push(edge.node);
                     }
                 }
             } else {
@@ -753,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn measure_collapse_test() {
+    fn measure_collapse_hadamard() {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
         let p1 = sim.measure_p1(0);
@@ -761,5 +769,18 @@ mod tests {
         sim.measure_collapse(0, true, p1);
         let p = sim.measure_p1(0);
         assert!((p - 1.0).abs() < 1e-12, "unexpected probability: {p:?} != 1.0");
+    }
+
+    #[test]
+    fn measure_collapse_bell() {
+        let mut sim = Qmdd::new(2);
+        sim.hadamard(0, &[]);
+        sim.pauli_x(1, &[0]);
+        let p1 = sim.measure_p1(0);
+        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
+        sim.measure_collapse(0, true, p1);
+        let p = sim.measure_p1(1);
+        assert!((p - 1.0).abs() < 1e-12, "unexpected probability: {p:?} != 1.0");
+        println!("Reconstructed state: {:?}", sim.reconstruct_state());
     }
 }
