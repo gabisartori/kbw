@@ -8,6 +8,8 @@ use num::complex::Complex;
 
 const COMPLEX_ZERO: Complex<f64> = Complex { re: 0.0, im: 0.0 };
 const COMPLEX_ONE: Complex<f64> = Complex { re: 1.0, im: 0.0 };
+const COMPLEX_INVERSE_SQRT_2: Complex<f64> = Complex { re: std::f64::consts::FRAC_1_SQRT_2, im: 0.0 };
+const COMPLEX_NEG_INVERSE_SQRT_2: Complex<f64> = Complex { re: -std::f64::consts::FRAC_1_SQRT_2, im: 0.0 };
 
 type NodeId = usize;
 
@@ -50,14 +52,14 @@ impl Qmdd {
         };
 
         let identity_weights = [
-            q.one_weight(),
-            q.zero_weight(),
-            q.zero_weight(),
-            q.one_weight(),
+            COMPLEX_ONE,
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            COMPLEX_ONE,
         ];
 
         let mut root = Edge {
-            weight: q.one_weight(),
+            weight: COMPLEX_ONE,
             node: q.true_node,
         };
 
@@ -83,21 +85,18 @@ impl Qmdd {
             return children[0];
         }
 
+        for (node_id, node) in self.nodes.iter().enumerate() {
+            if node.var == var && node.children == children && node.weights == weights {
+                return node_id;
+            }
+        }
+
         self.nodes.push(Node {
             var,
             children,
             weights,
         });
         self.nodes.len() - 1
-    }
-
-    // Fundamental functions for QMDD operations, as described in section 3.3.1
-    fn zero_weight(&self) -> Complex<f64> {
-        COMPLEX_ZERO
-    }
-
-    fn one_weight(&self) -> Complex<f64> {
-        COMPLEX_ONE
     }
 
     fn node_var(&self, node: NodeId) -> usize {
@@ -126,7 +125,7 @@ impl Qmdd {
     /// Algorithm for normalizing weights, described in section 3.3.2
     /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
     fn normalize_weights(&mut self, weights: &mut [Complex<f64>; 4]) -> Complex<f64> {
-        let zero = self.zero_weight();
+        let zero = COMPLEX_ZERO;
         let pivot_idx = weights.iter().position(|w| *w != zero);
         let Some(pivot_idx) = pivot_idx else {
             return zero;
@@ -138,14 +137,14 @@ impl Qmdd {
                 *w = *w / pivot;
             }
         }
-        weights[pivot_idx] = self.one_weight();
+        weights[pivot_idx] = COMPLEX_ONE;
         pivot
     }
 
     /// Algorithm for applying edges, described in section 3.3.3
     fn add_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
-            if e0.weight == self.zero_weight() {
+            if e0.weight == COMPLEX_ZERO {
                 return e1;
             }
             if self.edge_is_terminal(e1) {
@@ -161,7 +160,7 @@ impl Qmdd {
         }
 
         let mut z_children = [self.true_node; 4];
-        let mut z_weights = [self.zero_weight(); 4];
+        let mut z_weights = [COMPLEX_ZERO; 4];
 
         for i in 0..4 {
             let ei0 = self.get_ei(e0, i);
@@ -196,10 +195,10 @@ impl Qmdd {
     /// Algorithm for multiplying edges, described in section 3.3.4
     fn mul_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
-            if e0.weight == self.zero_weight() {
+            if e0.weight == COMPLEX_ZERO {
                 return e0;
             }
-            if e0.weight == self.one_weight() {
+            if e0.weight == COMPLEX_ONE {
                 return e1;
             }
             return Edge {
@@ -213,13 +212,13 @@ impl Qmdd {
         }
 
         let mut z_children = [self.true_node; 4];
-        let mut z_weights = [self.zero_weight(); 4];
+        let mut z_weights = [COMPLEX_ZERO; 4];
 
         // 2x2 block-matrix multiplication across quadrants.
         for i in (0..4).step_by(2) {
             for j in 0..2 {
                 let mut zij = Edge {
-                    weight: self.zero_weight(),
+                    weight: COMPLEX_ZERO,
                     node: self.true_node,
                 };
 
@@ -260,10 +259,10 @@ impl Qmdd {
     /// Algorithm for Kronecker product of edges, described in section 3.3.5.1
     fn kro_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
         if self.edge_is_terminal(e0) {
-            if e0.weight == self.zero_weight() {
+            if e0.weight == COMPLEX_ZERO {
                 return e0;
             }
-            if e0.weight == self.one_weight() {
+            if e0.weight == COMPLEX_ONE {
                 return e1;
             }
             return Edge {
@@ -273,7 +272,7 @@ impl Qmdd {
         }
 
         let mut z_children = [self.true_node; 4];
-        let mut z_weights = [self.zero_weight(); 4];
+        let mut z_weights = [COMPLEX_ZERO; 4];
 
         for i in 0..4 {
             let zi = self.kro_edge(self.get_ei(e0, i), e1);
@@ -300,7 +299,7 @@ impl Qmdd {
     fn local_operator_edge(&mut self, var: usize, weights: [Complex<f64>; 4]) -> Edge {
         let children = [self.true_node; 4];
         Edge {
-            weight: self.one_weight(),
+            weight: COMPLEX_ONE,
             node: self.make_node(var, children, weights),
         }
     }
@@ -317,27 +316,27 @@ impl Qmdd {
             .all(|&c| c < self.num_vars && c != gate.target));
 
         let identity_weights = [
-            self.one_weight(),
-            self.zero_weight(),
-            self.zero_weight(),
-            self.one_weight(),
+            COMPLEX_ONE,
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            COMPLEX_ONE,
         ];
         let if_false_weights = [
-            self.one_weight(),
-            self.zero_weight(),
-            self.zero_weight(),
-            self.zero_weight(),
+            COMPLEX_ONE,
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
         ];
         let if_true_weights = [
-            self.zero_weight(),
-            self.zero_weight(),
-            self.zero_weight(),
-            self.one_weight(),
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            COMPLEX_ZERO,
+            COMPLEX_ONE,
         ];
 
         let mut identity_subtree = vec![
             Edge {
-                weight: self.one_weight(),
+                weight: COMPLEX_ONE,
                 node: self.true_node,
             };
             self.num_vars + 1
@@ -349,11 +348,11 @@ impl Qmdd {
         }
 
         let mut active_gate = Edge {
-            weight: self.one_weight(),
+            weight: COMPLEX_ONE,
             node: self.true_node,
         };
         let mut inactive_gate = Edge {
-            weight: self.zero_weight(),
+            weight: COMPLEX_ZERO,
             node: self.true_node,
         };
 
@@ -509,10 +508,10 @@ const PAULI_Z_MATRIX: [Complex<f64>; 4] = [
 ];
 
 const HADAMARD_MATRIX: [Complex<f64>; 4] = [
-    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
-    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
-    Complex::<f64> { re: 0.7071067811865476, im: 0.0 },
-    Complex::<f64> { re: -0.7071067811865476, im: 0.0 },
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_INVERSE_SQRT_2,
+    COMPLEX_NEG_INVERSE_SQRT_2
 ];
 
 const M0_MATRIX: [Complex<f64>; 4] = [
@@ -714,8 +713,8 @@ mod tests {
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
-            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            COMPLEX_INVERSE_SQRT_2,
+            COMPLEX_INVERSE_SQRT_2,
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
@@ -762,10 +761,10 @@ mod tests {
         sim.pauli_x(1, &[0]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            COMPLEX_INVERSE_SQRT_2,
             COMPLEX_ZERO,
             COMPLEX_ZERO,
-            Complex::<f64>::new(std::f64::consts::FRAC_1_SQRT_2, 0.0),
+            COMPLEX_INVERSE_SQRT_2,
         ];
 
         for (actual, expected) in state.iter().zip(expected.iter()) {
@@ -787,6 +786,7 @@ mod tests {
         for i in 0..size {
             sim.hadamard(i, &[]);
         }
+        println!("Number of total nodes: {}", sim.nodes.len());
         println!("Number of currently used nodes: {}", sim.traverse());
         // let state = sim.reconstruct_state();
     }
