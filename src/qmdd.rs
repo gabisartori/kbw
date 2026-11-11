@@ -283,6 +283,13 @@ impl Qmdd {
 
     /// Algorithm for multiplying edges, described in section 3.3.4
     fn mul_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
+        // Swap e0 with e1 if e1 is terminal
+        let (e0, e1) = if self.edge_is_terminal(e1) {
+            (e1, e0)
+        } else {
+            (e0, e1)
+        };
+
         if self.edge_is_terminal(e0) {
             if e0.weight == COMPLEX_ZERO {
                 return e0;
@@ -294,10 +301,6 @@ impl Qmdd {
                 weight: e0.weight * e1.weight,
                 node: e1.node,
             };
-        }
-
-        if self.node_var(e0.node) > self.node_var(e1.node) {
-            return self.mul_edge(e1, e0);
         }
 
         let mut z = [self.zero_edge(); 4];
@@ -314,14 +317,10 @@ impl Qmdd {
                         node: ei0.node,
                     };
 
-                    let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
-                        let ei1 = self.get_ei(e1, j + 2 * k);
-                        Edge {
-                            weight: e1.weight * ei1.weight,
-                            node: ei1.node,
-                        }
-                    } else {
-                        e1
+                    let ei1 = self.get_ei(e1, j + 2 * k);
+                    let q1 = Edge {
+                        weight: e1.weight * ei1.weight,
+                        node: ei1.node,
                     };
 
                     let q0q1 = self.mul_edge(q0, q1);
@@ -719,7 +718,7 @@ mod tests {
 
     #[test]
     fn node_counter_test() {
-        let size = 5;
+        let size = 10;
         let mut sim = Qmdd::new(size);
         for i in 0..size {
             sim.hadamard(i, &[]);
