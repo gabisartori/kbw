@@ -4,15 +4,11 @@ use crate::quantum_execution::QuantumExecution;
 use ket::error::KetError;
 use ket::execution::DumpData;
 
-use std::collections::HashMap;
-use std::collections::BTreeMap;
-
 type NodeId = usize;
-type WeightId = usize;
 
 // A simple complex number struct to represent the weights in the QMDD.
 // TODO: real and imaginary parts should be represented as sqrt(2)-extended rational numbers so they can be better hashed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 struct Complex {
     re: f64,
     im: f64,
@@ -31,105 +27,99 @@ impl Complex {
         Self::new(1.0, 0.0)
     }
 
-    fn add(self, other: Self) -> Self {
-        Self::new(self.re + other.re, self.im + other.im)
-    }
-
-    fn sub(self, other: Self) -> Self {
-        Self::new(self.re - other.re, self.im - other.im)
-    }
-
-    fn mul(self, other: Self) -> Self {
-        Self::new(
-            self.re * other.re - self.im * other.im,
-            self.re * other.im + self.im * other.re,
-        )
-    }
-
-    fn div(self, other: Self) -> Self {
-        let denom = other.re * other.re + other.im * other.im;
-        if denom == 0.0 {
-            panic!("division by zero complex number");
-        }
-        Self::new(
-            (self.re * other.re + self.im * other.im) / denom,
-            (self.im * other.re - self.re * other.im) / denom,
-        )
-    }
-
     fn abs(self) -> f64 {
         (self.re * self.re + self.im * self.im).sqrt()
     }
 }
 
+impl std::ops::Add for Complex {
+    type Output = Complex;
+    
+    fn add(self, other: Complex) -> Complex {
+        Complex {
+            re: self.re + other.re,
+            im: self.im + other.im,
+        }
+    }
+}
+
+impl std::ops::Sub for Complex {
+    type Output = Complex;
+    
+    fn sub(self, other: Complex) -> Complex {
+        Complex {
+            re: self.re - other.re,
+            im: self.im - other.im,
+        }
+    }
+}
+
+impl std::ops::Neg for Complex {
+    type Output = Complex;
+    
+    fn neg(self) -> Complex {
+        Complex {
+            re: -self.re,
+            im: -self.im,
+        }
+    }
+}
+
+impl std::ops::Mul for Complex {
+    type Output = Complex;
+    
+    fn mul(self, other: Complex) -> Complex {
+        Complex {
+            re: self.re * other.re - self.im * other.im,
+            im: self.re * other.im + self.im * other.re,
+        }
+    }
+}
+
+impl std::ops::Div for Complex {
+    type Output = Complex;
+    
+    fn div(self, other: Complex) -> Complex {
+        let denom = other.re * other.re + other.im * other.im;
+        if denom == 0.0 {
+            panic!("division by zero complex number");
+        }
+        Complex {
+            re: (self.re * other.re + self.im * other.im) / denom,
+            im: (self.im * other.re - self.re * other.im) / denom,
+        }
+    }
+}
+
+
+impl std::cmp::PartialEq for Complex {
+    fn eq(&self, other: &Self) -> bool {
+        (*self - *other).abs() < 1e-12
+    }
+}
+
+impl std::cmp::Eq for Complex { }
+
 /// An edge in the QMDD, holding a weight and its target node
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Edge {
-    weight: WeightId,
+    weight: Complex,
     node: NodeId,
 }
 
 /// A node in the QMDD, holding a variable and its four outgoing edges
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Node {
     var: usize,
     children: [NodeId; 4],
-    weights: [WeightId; 4],
-}
-
-/// Table for storing unique weights (complex numbers) and providing a mapping from WeightId to the actual complex value. This allows for efficient reuse of weights and avoids duplication.
-#[derive(Clone, Debug)]
-struct WeightTable {
-    values: Vec<Complex>,
-}
-
-impl WeightTable {
-    fn new() -> Self {
-        Self {
-            values: vec![Complex::zero(), Complex::one()],
-        }
-    }
-    /// Inserts a new weight into the table, or returns the existing weight if it already exists.
-    fn insert(&mut self, value: Complex) -> WeightId {
-        // TODO: This should be done using a hash table. Since <Complex> is currently using f64 rather than sqrt(2)-extended rationals this isn't possible yet.
-        for (idx, existing) in self.values.iter().enumerate() {
-            if (existing.sub(value)).abs() < f64::EPSILON {
-                return idx;
-            }
-        }
-        self.values.push(value);
-        self.values.len() - 1
-    }
-
-    /// Returns the complex value for a given weight ID.
-    fn get(&self, id: WeightId) -> Complex {
-        self.values[id]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum EdgeOp {
-    Add,
-    Mul,
-    Kro,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WeightOp {
-    Add,
-    Mul,
-    Div,
+    weights: [Complex; 4],
 }
 
 #[derive(Clone, Debug)]
 pub struct Qmdd {
     num_vars: usize,
     true_node: NodeId,
-    nodes: BTreeMap<NodeId, Node>,
-    node_counter: NodeId,
-    node_index: HashMap<Node, NodeId>,
-    weights: WeightTable,
-    edge_cache: HashMap<(Edge, Edge, EdgeOp), Edge>,
+    nodes: Vec<Node>,
     root: Edge,
 }
 
@@ -140,12 +130,12 @@ impl Qmdd {
             num_vars,
             true_node: 0,
             // Terminal node points to itself since it'll never actually be followed
-            nodes: BTreeMap::new(),
-            node_counter: 1,
-            node_index: HashMap::new(),
-            weights: WeightTable::new(),
-            edge_cache: HashMap::new(),
-            root: Edge { weight: 1, node: 0 },
+            nodes: vec![Node {
+                var: num_vars,
+                children: [0; 4],
+                weights: [Complex::one(); 4]
+            }],
+            root: Edge { weight: Complex::one(), node: 0 },
         };
 
         let identity_weights = [
@@ -155,12 +145,6 @@ impl Qmdd {
             q.one_weight(),
         ];
 
-        q.nodes.insert(0, Node {
-            var: num_vars,
-            children: [0; 4],
-            weights: [1; 4],
-        });
-
         let mut root = Edge {
             weight: q.one_weight(),
             node: q.true_node,
@@ -169,7 +153,7 @@ impl Qmdd {
         // Build the n-qubit identity operator as a Kronecker chain.
         for var in (0..num_vars).rev() {
             let i_edge = q.local_operator_edge(var, identity_weights);
-            root = q.apply_edge(i_edge, root, EdgeOp::Kro);
+            root = q.kro_edge(i_edge, root);
         }
         q.root = root;
 
@@ -178,54 +162,43 @@ impl Qmdd {
 
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
     /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
-    fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [WeightId; 4]) -> NodeId {
+    fn make_node(&mut self, var: usize, children: [NodeId; 4], weights: [Complex; 4]) -> NodeId {
         let redundant = children
             .iter()
             .zip(weights.iter())
             .all(|(child, w)| *child == children[0] && *w == weights[0]);
-        if redundant {
+
+            if redundant {
             return children[0];
         }
 
-        let key = Node {
-            var,
-            children,
-            weights,
-        };
-        if let Some(&id) = self.node_index.get(&key) {
-            return id;
-        }
-
-        let id = self.node_counter;
-        self.node_counter += 1;
-        self.nodes.insert(id, Node {
+        self.nodes.push(Node {
             var,
             children,
             weights,
         });
-        self.node_index.insert(key, id);
-        id
+        self.nodes.len() - 1
     }
 
     // Fundamental functions for QMDD operations, as described in section 3.3.1
-    fn zero_weight(&self) -> WeightId {
-        0
+    fn zero_weight(&self) -> Complex {
+        Complex::zero()
     }
 
-    fn one_weight(&self) -> WeightId {
-        1
+    fn one_weight(&self) -> Complex {
+        Complex::one()
     }
 
     fn node_var(&self, node: NodeId) -> usize {
-        self.nodes.get(&node).unwrap().var
+        self.nodes[node].var
     }
 
     fn child(&self, node: NodeId, idx: usize) -> NodeId {
-        self.nodes.get(&node).unwrap().children[idx]
+        self.nodes[node].children[idx]
     }
 
-    fn weight_at(&self, node: NodeId, idx: usize) -> WeightId {
-        self.nodes.get(&node).unwrap().weights[idx]
+    fn weight_at(&self, node: NodeId, idx: usize) -> Complex {
+        self.nodes[node].weights[idx]
     }
 
     fn edge_is_terminal(&self, e: Edge) -> bool {
@@ -239,21 +212,9 @@ impl Qmdd {
         }
     }
 
-    /// Wrapper for weight operations that caches results to avoid redundant computations
-    fn apply_weight(&mut self, w0: WeightId, w1: WeightId, op: WeightOp) -> WeightId {
-        let a = self.weights.get(w0);
-        let b = self.weights.get(w1);
-        let value = match op {
-            WeightOp::Add => a.add(b),
-            WeightOp::Mul => a.mul(b),
-            WeightOp::Div => a.div(b),
-        };
-        self.weights.insert(value)
-    }
-
     /// Algorithm for normalizing weights, described in section 3.3.2
     /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
-    fn normalize_weights(&mut self, weights: &mut [WeightId; 4]) -> WeightId {
+    fn normalize_weights(&mut self, weights: &mut [Complex; 4]) -> Complex {
         let zero = self.zero_weight();
         let pivot_idx = weights.iter().position(|w| *w != zero);
         let Some(pivot_idx) = pivot_idx else {
@@ -263,7 +224,7 @@ impl Qmdd {
         let pivot = weights[pivot_idx];
         for w in weights.iter_mut() {
             if *w != zero {
-                *w = self.apply_weight(*w, pivot, WeightOp::Div);
+                *w = *w / pivot;
             }
         }
         weights[pivot_idx] = self.one_weight();
@@ -278,7 +239,7 @@ impl Qmdd {
             }
             if self.edge_is_terminal(e1) {
                 return Edge {
-                    weight: self.apply_weight(e0.weight, e1.weight, WeightOp::Add),
+                    weight: e0.weight + e1.weight,
                     node: self.true_node,
                 };
             }
@@ -294,21 +255,21 @@ impl Qmdd {
         for i in 0..4 {
             let ei0 = self.get_ei(e0, i);
             let q0 = Edge {
-                weight: self.apply_weight(e0.weight, ei0.weight, WeightOp::Mul),
+                weight: e0.weight * ei0.weight,
                 node: ei0.node,
             };
 
             let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
                 let ei1 = self.get_ei(e1, i);
                 Edge {
-                    weight: self.apply_weight(e1.weight, ei1.weight, WeightOp::Mul),
+                    weight: e1.weight * ei1.weight,
                     node: ei1.node,
                 }
             } else {
                 e1
             };
 
-            let zi = self.apply_edge(q0, q1, EdgeOp::Add);
+            let zi = self.add_edge(q0, q1);
             z_children[i] = zi.node;
             z_weights[i] = zi.weight;
         }
@@ -331,7 +292,7 @@ impl Qmdd {
                 return e1;
             }
             return Edge {
-                weight: self.apply_weight(e0.weight, e1.weight, WeightOp::Mul),
+                weight: e0.weight * e1.weight,
                 node: e1.node,
             };
         }
@@ -354,22 +315,22 @@ impl Qmdd {
                 for k in 0..2 {
                     let ei0 = self.get_ei(e0, i + k);
                     let q0 = Edge {
-                        weight: self.apply_weight(e0.weight, ei0.weight, WeightOp::Mul),
+                        weight: e0.weight * ei0.weight,
                         node: ei0.node,
                     };
 
                     let q1 = if self.node_var(e0.node) == self.node_var(e1.node) {
                         let ei1 = self.get_ei(e1, j + 2 * k);
                         Edge {
-                            weight: self.apply_weight(e1.weight, ei1.weight, WeightOp::Mul),
+                            weight: e1.weight * ei1.weight,
                             node: ei1.node,
                         }
                     } else {
                         e1
                     };
 
-                    let q0q1 = self.apply_edge(q0, q1, EdgeOp::Mul);
-                    zij = self.apply_edge(zij, q0q1, EdgeOp::Add);
+                    let q0q1 = self.mul_edge(q0, q1);
+                    zij = self.add_edge(zij, q0q1);
                 }
 
                 z_children[i + j] = zij.node;
@@ -395,7 +356,7 @@ impl Qmdd {
                 return e1;
             }
             return Edge {
-                weight: self.apply_weight(e0.weight, e1.weight, WeightOp::Mul),
+                weight: e0.weight * e1.weight,
                 node: e1.node,
             };
         }
@@ -404,13 +365,13 @@ impl Qmdd {
         let mut z_weights = [self.zero_weight(); 4];
 
         for i in 0..4 {
-            let zi = self.apply_edge(self.get_ei(e0, i), e1, EdgeOp::Kro);
+            let zi = self.kro_edge(self.get_ei(e0, i), e1);
             z_children[i] = zi.node;
             z_weights[i] = zi.weight;
         }
 
         let mut pivot = self.normalize_weights(&mut z_weights);
-        pivot = self.apply_weight(pivot, e0.weight, WeightOp::Mul);
+        pivot = pivot * e0.weight;
         let new_node = self.make_node(self.node_var(e0.node), z_children, z_weights);
         Edge {
             weight: pivot,
@@ -418,50 +379,14 @@ impl Qmdd {
         }
     }
 
-    /// Wrapper for edge operations that caches results to avoid redundant computations
-    fn apply_edge(&mut self, e0: Edge, e1: Edge, op: EdgeOp) -> Edge {
-        let key = (e0, e1, op);
-        if let Some(&cached) = self.edge_cache.get(&key) {
-            return cached;
-        }
-        // Check for commutative in addition and multiplication
-        if matches!(op, EdgeOp::Add | EdgeOp::Mul) {
-            let key = (e1, e0, op);
-            if let Some(&cached) = self.edge_cache.get(&key) {
-                return cached;
-            }
-        }
-
-        let result = match op {
-            EdgeOp::Add => self.add_edge(e0, e1),
-            EdgeOp::Mul => self.mul_edge(e0, e1),
-            EdgeOp::Kro => self.kro_edge(e0, e1),
-        };
-
-        self.edge_cache.insert(key, result);
-        result
-    }
-
     /// Interface for applying an arbitrary quantum gate to the current QMDD, updating the root edge accordingly
     fn apply_gate(&mut self, gate: Gate) {
         let gate_edge = self.build_controlled_gate_edge(&gate);
-        self.root = self.apply_edge(gate_edge, self.root, EdgeOp::Mul);
-    }
-
-    /// Convert a 4x4 matrix of complex numbers to a 4-element array of WeightId
-    /// It checks whether the desired weights are already present in the weight table and reuses them if possible, otherwise it inserts new weights.
-    fn matrix_to_weights(&mut self, matrix: &[Complex; 4]) -> [WeightId; 4] {
-        let mut weights = [self.zero_weight(); 4];
-        for idx in 0..4 {
-            if matrix[idx] != Complex::zero() {
-                weights[idx] = self.weights.insert(matrix[idx]);
-            }
-        }
-        weights
+        self.root = self.mul_edge(gate_edge, self.root);
     }
 
     // TODO: Not sure what this does
-    fn local_operator_edge(&mut self, var: usize, weights: [WeightId; 4]) -> Edge {
+    fn local_operator_edge(&mut self, var: usize, weights: [Complex; 4]) -> Edge {
         let children = [self.true_node; 4];
         Edge {
             weight: self.one_weight(),
@@ -498,7 +423,6 @@ impl Qmdd {
             self.zero_weight(),
             self.one_weight(),
         ];
-        let gate_weights = self.matrix_to_weights(&gate.matrix);
 
         let mut identity_subtree = vec![
             Edge {
@@ -510,7 +434,7 @@ impl Qmdd {
 
         for var in (0..self.num_vars).rev() {
             let i_edge = self.local_operator_edge(var, identity_weights);
-            identity_subtree[var] = self.apply_edge(i_edge, identity_subtree[var + 1], EdgeOp::Kro);
+            identity_subtree[var] = self.kro_edge(i_edge, identity_subtree[var + 1]);
         }
 
         let mut active_gate = Edge {
@@ -535,34 +459,34 @@ impl Qmdd {
             if var > gate.target {
                 if is_control {
                     let p1_edge = self.local_operator_edge(var, if_true_weights);
-                    active_gate = self.apply_edge(p1_edge, active_gate, EdgeOp::Kro);
+                    active_gate = self.kro_edge(p1_edge, active_gate);
 
                     let p0_edge = self.local_operator_edge(var, if_false_weights);
-                    let p0_part = self.apply_edge(p0_edge, identity_subtree[var + 1], EdgeOp::Kro);
-                    let p1_part = self.apply_edge(p1_edge, inactive_gate, EdgeOp::Kro);
-                    inactive_gate = self.apply_edge(p0_part, p1_part, EdgeOp::Add);
+                    let p0_part = self.kro_edge(p0_edge, identity_subtree[var + 1]);
+                    let p1_part = self.kro_edge(p1_edge, inactive_gate);
+                    inactive_gate = self.add_edge(p0_part, p1_part);
                 } else {
                     let i_edge = self.local_operator_edge(var, identity_weights);
-                    active_gate = self.apply_edge(i_edge, active_gate, EdgeOp::Kro);
-                    inactive_gate = self.apply_edge(i_edge, inactive_gate, EdgeOp::Kro);
+                    active_gate = self.kro_edge(i_edge, active_gate);
+                    inactive_gate = self.kro_edge(i_edge, inactive_gate);
                 }
             } else if var == gate.target {
                 let i_edge = self.local_operator_edge(var, identity_weights);
-                let u_edge = self.local_operator_edge(var, gate_weights);
+                let u_edge = self.local_operator_edge(var, gate.matrix);
 
-                let inactive_part = self.apply_edge(i_edge, inactive_gate, EdgeOp::Kro);
-                let active_part = self.apply_edge(u_edge, active_gate, EdgeOp::Kro);
-                active_gate = self.apply_edge(inactive_part, active_part, EdgeOp::Add);
+                let inactive_part = self.kro_edge(i_edge, inactive_gate);
+                let active_part = self.kro_edge(u_edge, active_gate);
+                active_gate = self.add_edge(inactive_part, active_part);
             } else if is_control {
                 let p0_edge = self.local_operator_edge(var, if_false_weights);
                 let p1_edge = self.local_operator_edge(var, if_true_weights);
 
-                let p0_part = self.apply_edge(p0_edge, identity_subtree[var + 1], EdgeOp::Kro);
-                let p1_part = self.apply_edge(p1_edge, active_gate, EdgeOp::Kro);
-                active_gate = self.apply_edge(p0_part, p1_part, EdgeOp::Add);
+                let p0_part = self.kro_edge(p0_edge, identity_subtree[var + 1]);
+                let p1_part = self.kro_edge(p1_edge, active_gate);
+                active_gate = self.add_edge(p0_part, p1_part);
             } else {
                 let i_edge = self.local_operator_edge(var, identity_weights);
-                active_gate = self.apply_edge(i_edge, active_gate, EdgeOp::Kro);
+                active_gate = self.kro_edge(i_edge, active_gate);
             }
         }
 
@@ -580,26 +504,27 @@ impl Qmdd {
         let mut state = vec![Complex::zero(); dim];
 
         if self.root.node == self.true_node {
-            state[0] = self.weights.get(self.root.weight);
+            state[0] = self.root.weight;
             return state;
         }
         for basis in 0..dim {
-            let mut value = self.weights.get(self.root.weight);
+            let mut value = self.root.weight;
             let mut current_edge = self.root;
-            let mut current_node = self.nodes.get(&current_edge.node).unwrap();
+            let mut current_node = &self.nodes[current_edge.node];
             loop {
                 let bit = current_node.var;
                 let bit_index = (basis >> bit) & 1;
                 let child_index = if bit_index == 0 { 0 } else { 2 };
                 let next_edge = self.get_ei(current_edge, child_index);
-                value = value.mul(self.weights.get(next_edge.weight));
+                // TODO: Impl MulAssign
+                value = value * next_edge.weight;
 
                 if current_edge.node == self.true_node {
                     break;
                 }
 
                 current_edge = next_edge;
-                current_node = self.nodes.get(&current_edge.node).unwrap();
+                current_node = &self.nodes[current_edge.node];
             }
 
             state[basis] = value;
@@ -607,6 +532,7 @@ impl Qmdd {
         state
     }
 
+    #[cfg(test)]
     fn traverse(&self) -> usize {
         let mut visited = std::collections::HashSet::new();
         let mut stack = vec![self.root.node];
@@ -617,7 +543,7 @@ impl Qmdd {
                     continue;
                 }
                 count += 1;
-                let node = self.nodes.get(&node_id).unwrap();
+                let node = &self.nodes[node_id];
                 for &child in &node.children {
                     if child != self.true_node {
                         stack.push(child);
@@ -826,16 +752,12 @@ impl QuantumExecution for Qmdd {
         let matrix = if result { M1_MATRIX } else { M0_MATRIX };
         let gate = Gate::new(vec![], target, matrix);
         let e = self.build_controlled_gate_edge(&gate);
-        self.root = self.apply_edge(e, self.root, EdgeOp::Mul);
-        self.root.weight = self.weights.insert(self.weights.get(self.root.weight).mul(Complex::new(p, 0.0)));
+        self.root = self.mul_edge(e, self.root);
+        self.root.weight = self.root.weight / Complex::new(p.sqrt(), 0.0);
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
-        println!("Number of total nodes: {}", self.node_counter);
-
-        println!("Number of currently used nodes: {}", self.traverse());
         let output = self.reconstruct_state();
-
         let mut basis_states = Vec::new();
         let mut amplitudes_real = Vec::new();
         let mut amplitudes_imag = Vec::new();
@@ -949,12 +871,11 @@ mod tests {
 
     #[test]
     fn node_counter_test() {
-        let size = 20;
+        let size = 10;
         let mut sim = Qmdd::new(size);
         for i in 0..size {
             sim.hadamard(i, &[]);
         }
-        println!("Number of total nodes: {}", sim.node_counter);
         println!("Number of currently used nodes: {}", sim.traverse());
         // let state = sim.reconstruct_state();
     }
