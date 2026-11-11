@@ -172,22 +172,28 @@ impl Qmdd {
     /// Creates a new node in the QMDD and inserts it to the node index, or returns an existing node if it already exists.
     /// It also checks for redundancy: if all children and weights are the same, it returns the child node instead of creating a new one.
     fn make_node(&mut self, var: usize, edges: [Edge; 4]) -> NodeId {
-        let redundant = edges
-            .iter()
-            .all(|edge| *edge == edges[0]);
-
-        if redundant {
-            return edges[0].node
+        // Return the child node if all edges are the same, to avoid redundancy.
+        if edges.iter().all(|edge| *edge == edges[0]) {
+            return edges[0].node;
         }
 
+        // If node already exists in the graph, return its id
         for (node_id, node) in self.nodes.iter().enumerate() {
             if node.var == var && node.edges == edges {
                 return node_id;
             }
         }
 
+        // Create new node
         self.nodes.push(Node { var, edges });
         self.nodes.len() - 1
+    }
+
+    fn zero_edge(&self) -> Edge {
+        Edge {
+            weight: COMPLEX_ZERO,
+            node: self.true_node
+        }
     }
 
     fn node_var(&self, node: NodeId) -> usize {
