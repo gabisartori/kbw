@@ -219,25 +219,6 @@ impl Qmdd {
         }
     }
 
-    /// Algorithm for normalizing weights, described in section 3.3.2
-    /// With the slight difference that node redundancy is checked in make_node, so this function doesn't need to check for it.
-    // fn normalize_weights(&mut self, weights: &mut [Complex<f64>; 4]) -> Complex<f64> {
-    //     let zero = COMPLEX_ZERO;
-    //     let pivot_idx = weights.iter().position(|w| *w != zero);
-    //     let Some(pivot_idx) = pivot_idx else {
-    //         return zero;
-    //     };
-
-    //     let pivot = weights[pivot_idx];
-    //     for w in weights.iter_mut() {
-    //         if *w != zero {
-    //             *w = *w / pivot;
-    //         }
-    //     }
-    //     weights[pivot_idx] = COMPLEX_ONE;
-    //     pivot
-    // }
-
     fn normalize_weights(&mut self, edges: &mut [Edge; 4]) -> Complex<f64> {
         if let Some(pivot_idx) = edges.iter().position(|e| e.weight != COMPLEX_ZERO) {
             let pivot = edges[pivot_idx].weight;
@@ -255,6 +236,13 @@ impl Qmdd {
 
     /// Algorithm for applying edges, described in section 3.3.3
     fn add_edge(&mut self, e0: Edge, e1: Edge) -> Edge {
+        // Swap e0 with e1 if e1 is terminal
+        let (e0, e1) = if self.edge_is_terminal(e1) {
+            (e1, e0)
+        } else {
+            (e0, e1)
+        };
+        
         if self.edge_is_terminal(e0) {
             if e0.weight == COMPLEX_ZERO {
                 return e1;
