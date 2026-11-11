@@ -678,6 +678,20 @@ const HADAMARD_MATRIX: [Complex; 4] = [
     Complex { re: -0.7071067811865476, im: 0.0 },
 ];
 
+const M0_MATRIX: [Complex; 4] = [
+    Complex { re: 1.0, im: 0.0 },
+    Complex { re: 0.0, im: 0.0 },
+    Complex { re: 0.0, im: 0.0 },
+    Complex { re: 0.0, im: 0.0 }
+];
+
+const M1_MATRIX: [Complex; 4] = [
+    Complex { re: 0.0, im: 0.0 },
+    Complex { re: 0.0, im: 0.0 },
+    Complex { re: 0.0, im: 0.0 },
+    Complex { re: 1.0, im: 0.0 }
+];
+
 fn phase_matrix(lambda: f64) -> [Complex; 4] {
     [
         Complex { re: 1.0, im: 0.0 },
@@ -808,7 +822,13 @@ impl QuantumExecution for Qmdd {
             .sum()
     }
 
-    fn measure_collapse(&mut self, _target: usize, _result: bool, _p: f64) {}
+    fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
+        let matrix = if result { M1_MATRIX } else { M0_MATRIX };
+        let gate = Gate::new(vec![], target, matrix);
+        let e = self.build_controlled_gate_edge(&gate);
+        self.root = self.apply_edge(e, self.root, EdgeOp::Mul);
+        self.root.weight = self.weights.insert(self.weights.get(self.root.weight).mul(Complex::new(p, 0.0)));
+    }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         println!("Number of total nodes: {}", self.node_counter);
@@ -937,5 +957,16 @@ mod tests {
         println!("Number of total nodes: {}", sim.node_counter);
         println!("Number of currently used nodes: {}", sim.traverse());
         // let state = sim.reconstruct_state();
+    }
+
+    #[test]
+    fn measure_collapse_test() {
+        let mut sim = Qmdd::new(1);
+        sim.hadamard(0, &[]);
+        let p1 = sim.measure_p1(0);
+        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
+        sim.measure_collapse(0, true, p1);
+        let p = sim.measure_p1(0);
+        assert!((p - 1.0).abs() < 1e-12, "unexpected probability: {p:?} != 1.0");
     }
 }
