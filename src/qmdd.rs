@@ -35,6 +35,10 @@ impl Complex {
         Self::new(self.re + other.re, self.im + other.im)
     }
 
+    fn sub(self, other: Self) -> Self {
+        Self::new(self.re - other.re, self.im - other.im)
+    }
+
     fn mul(self, other: Self) -> Self {
         Self::new(
             self.re * other.re - self.im * other.im,
@@ -51,6 +55,10 @@ impl Complex {
             (self.re * other.re + self.im * other.im) / denom,
             (self.im * other.re - self.re * other.im) / denom,
         )
+    }
+
+    fn abs(self) -> f64 {
+        (self.re * self.re + self.im * self.im).sqrt()
     }
 }
 
@@ -85,7 +93,7 @@ impl WeightTable {
     fn insert(&mut self, value: Complex) -> WeightId {
         // TODO: This should be done using a hash table. Since <Complex> is currently using f64 rather than sqrt(2)-extended rationals this isn't possible yet.
         for (idx, existing) in self.values.iter().enumerate() {
-            if *existing == value {
+            if (existing.sub(value)).abs() < f64::EPSILON {
                 return idx;
             }
         }
@@ -329,7 +337,7 @@ impl Qmdd {
         }
 
         if self.node_var(e0.node) > self.node_var(e1.node) {
-            return self.add_edge(e1, e0);
+            return self.mul_edge(e1, e0);
         }
 
         let mut z_children = [self.true_node; 4];
@@ -415,6 +423,13 @@ impl Qmdd {
         let key = (e0, e1, op);
         if let Some(&cached) = self.edge_cache.get(&key) {
             return cached;
+        }
+        // Check for commutative in addition and multiplication
+        if matches!(op, EdgeOp::Add | EdgeOp::Mul) {
+            let key = (e1, e0, op);
+            if let Some(&cached) = self.edge_cache.get(&key) {
+                return cached;
+            }
         }
 
         let result = match op {
@@ -592,7 +607,6 @@ impl Qmdd {
         state
     }
 
-    #[cfg(test)]
     fn traverse(&self) -> usize {
         let mut visited = std::collections::HashSet::new();
         let mut stack = vec![self.root.node];
@@ -797,6 +811,9 @@ impl QuantumExecution for Qmdd {
     fn measure_collapse(&mut self, _target: usize, _result: bool, _p: f64) {}
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
+        println!("Number of total nodes: {}", self.node_counter);
+
+        println!("Number of currently used nodes: {}", self.traverse());
         let output = self.reconstruct_state();
 
         let mut basis_states = Vec::new();
@@ -912,13 +929,13 @@ mod tests {
 
     #[test]
     fn node_counter_test() {
-        let mut sim = Qmdd::new(10);
-        sim.hadamard(0, &[]);
-        sim.pauli_x(1, &[0]);
-        // sim.hadamard(1, &[]);
-        let state = sim.dump(&[0, 1]);
-        println!("Number of nodes used: {}", sim.node_counter);
-        println!("Used number of nodes: {}", sim.traverse());
-        println!("Dumped state: {:?}", state);
+        let size = 20;
+        let mut sim = Qmdd::new(size);
+        for i in 0..size {
+            sim.hadamard(i, &[]);
+        }
+        println!("Number of total nodes: {}", sim.node_counter);
+        println!("Number of currently used nodes: {}", sim.traverse());
+        // let state = sim.reconstruct_state();
     }
 }
