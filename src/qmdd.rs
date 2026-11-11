@@ -255,10 +255,6 @@ impl Qmdd {
             }
         }
 
-        if self.node_var(e0.node) > self.node_var(e1.node) {
-            return self.add_edge(e1, e0);
-        }
-
         let mut z = [Edge{
             weight: COMPLEX_ZERO,
             node: self.true_node,
