@@ -632,7 +632,7 @@ impl QuantumExecution for Qmdd {
         let gate = Gate::new(vec![], target, matrix);
         let e = self.build_controlled_gate_edge(&gate);
         self.root = self.mul_edge(e, self.root);
-        self.root.weight = self.root.weight / Complex::<f64>::new(p.sqrt(), 0.0);
+        self.root.weight = self.root.weight * Complex::<f64>::new(p, 0.0);
     }
 
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
@@ -765,10 +765,11 @@ mod tests {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
         let p1 = sim.measure_p1(0);
+        let p = 1.0/p1.sqrt();
         assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
-        sim.measure_collapse(0, true, p1);
-        let p = sim.measure_p1(0);
-        assert!((p - 1.0).abs() < 1e-12, "unexpected probability: {p:?} != 1.0");
+        sim.measure_collapse(0, true, p);
+        let p1 = sim.measure_p1(0);
+        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
     }
 
     #[test]
@@ -777,10 +778,12 @@ mod tests {
         sim.hadamard(0, &[]);
         sim.pauli_x(1, &[0]);
         let p1 = sim.measure_p1(0);
+        let p = 1.0/p1.sqrt();
+        println!("Probability of measuring 1 on qubit 0: {p1:?}");
         assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
-        sim.measure_collapse(0, true, p1);
-        let p = sim.measure_p1(1);
-        assert!((p - 1.0).abs() < 1e-12, "unexpected probability: {p:?} != 1.0");
+        sim.measure_collapse(0, true, p);
+        let p1 = sim.measure_p1(1);
+        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
         println!("Reconstructed state: {:?}", sim.reconstruct_state());
     }
 }
