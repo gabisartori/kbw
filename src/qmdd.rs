@@ -49,91 +49,180 @@ const M1_MATRIX: [ComplexId; 4] = [
     ComplexTable::ONE
 ];
 
+fn phase_matrix(lambda: f64, table: &mut ComplexTable) -> [ComplexId; 4] {
+    let c = Complex::new(lambda.cos(), lambda.sin());
+    [
+        table.intern(Complex::ONE),
+        table.intern(Complex::ZERO),
+        table.intern(Complex::ZERO),
+        table.intern(c),
+    ]
+}
+
+fn rx_matrix(theta: f64, table: &mut ComplexTable) -> [ComplexId; 4] {
+    let c = Complex::new((theta / 2.0).cos(), 0.0);
+    let s = Complex::new(0.0, -(theta / 2.0).sin());
+    [
+        table.intern(c),
+        table.intern(s),
+        table.intern(s),
+        table.intern(c),
+    ]
+}
+
+fn ry_matrix(theta: f64, table: &mut ComplexTable) -> [ComplexId; 4] {
+    let c = Complex::new((theta / 2.0).cos(), 0.0);
+    let s = Complex::new(-(theta / 2.0).sin(), 0.0);
+    [
+        table.intern(c),
+        table.intern(s),
+        table.intern(-s),
+        table.intern(c),
+    ]
+}
+
+fn rz_matrix(theta: f64, table: &mut ComplexTable) -> [ComplexId; 4] {
+    let c = Complex::new((theta / 2.0).cos(), (theta / 2.0).sin());
+    let c_conj = Complex::new((theta / 2.0).cos(), -(theta / 2.0).sin());
+    [
+        table.intern(c_conj),
+        table.intern(Complex::ZERO),
+        table.intern(Complex::ZERO),
+        table.intern(c),
+    ]
+}
+
 // ============================================================================
 // 1. Exact Algebraic Complex Numbers: (A + B/sqrt(2) + C*j + D/sqrt(2)*j) / E
 // ============================================================================
 
-fn gcd_two(mut a: i128, mut b: i128) -> i128 {
-    a = a.abs();
-    b = b.abs();
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
+use std::hash::{Hash, Hasher};
+
+// ============================================================================
+// 1. Hashable f64 Complex Numbers with Tolerance Support
+// ============================================================================
+
+#[derive(Debug, Clone, Copy)]
+pub struct Complex {
+    pub re: f64,
+    pub im: f64,
 }
 
-fn gcd_five(a: i128, b: i128, c: i128, d: i128, e: i128) -> i128 {
-    gcd_two(gcd_two(gcd_two(gcd_two(a, b), c), d), e)
+impl Complex {
+    pub const ZERO: Complex = Complex { re: 0.0, im: 0.0 };
+    pub const ONE: Complex = Complex { re: 1.0, im: 0.0 };
+    pub const I: Complex = Complex { re: 0.0, im: 1.0 };
+    pub const NEG_I: Complex = Complex { re: 0.0, im: -1.0 };
+    pub const A: Complex = Complex { re: FRAC_1_SQRT_2, im: 0.0 };
+    pub const NEG_A: Complex = Complex { re: -FRAC_1_SQRT_2, im: 0.0 };
+    pub const NEG_ONE: Complex = Complex { re: -1.0, im: 0.0 };
+
+    pub fn new(re: f64, im: f64) -> Self {
+        let re = if re == -0.0 { 0.0 } else { re };
+        let im = if im == -0.0 { 0.0 } else { im };
+        Self { re, im }
+    }
+
+    pub fn conj(&self) -> Self {
+        Self::new(self.re, -self.im)
+    }
+
+    pub fn norm_sqr(&self) -> f64 {
+        self.re * self.re + self.im * self.im
+    }
+
+    pub fn abs(&self) -> f64 {
+        self.norm_sqr().sqrt()
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComplexVal {
-    pub a: i128,
-    pub b: i128,
-    pub c: i128,
-    pub d: i128,
-    pub e: i128,
+impl std::ops::Add for Complex {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Complex::new(self.re + rhs.re, self.im + rhs.im)
+    }
 }
 
-impl ComplexVal {
-    /// Creates a canonicalized complex value where gcd(a,b,c,d,e) == 1 and e > 0.
-    pub fn new(a: i128, b: i128, c: i128, d: i128, e: i128) -> Self {
-        assert!(e != 0, "Error in ComplexVal::new(): Division by zero.");
-        let g = gcd_five(a, b, c, d, e);
-        let sign = if e < 0 { -1 } else { 1 };
-        let f = g * sign;
-        Self {
-            a: a / f,
-            b: b / f,
-            c: c / f,
-            d: d / f,
-            e: e / f,
-        }
+impl std::ops::Sub for Complex {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Complex::new(self.re - rhs.re, self.im - rhs.im)
     }
+}
 
-    pub fn re(&self) -> f64 {
-        (self.a as f64 + (self.b as f64) * FRAC_1_SQRT_2) / (self.e as f64)
+impl std::ops::Neg for Complex {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Complex::new(-self.re, -self.im)
     }
+}
 
-    pub fn im(&self) -> f64 {
-        (self.c as f64 + (self.d as f64) * FRAC_1_SQRT_2) / (self.e as f64)
+impl std::ops::Mul for Complex {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        Complex::new(
+            self.re * rhs.re - self.im * rhs.im,
+            self.re * rhs.im + self.im * rhs.re,
+        )
     }
+}
 
-    pub fn mag2(&self) -> f64 {
-        let r = self.re();
-        let i = self.im();
-        r * r + i * i
+impl std::ops::Div for Complex {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self {
+        let denom = rhs.norm_sqr();
+        Complex::new(
+            (self.re * rhs.re + self.im * rhs.im) / denom,
+            (self.im * rhs.re - self.re * rhs.im) / denom,
+        )
+    }
+}
+
+// Wrapper for hashability using bit-casting
+#[derive(Debug, Clone, Copy)]
+pub struct HashableComplex(pub Complex);
+
+impl PartialEq for HashableComplex {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.re.to_bits() == other.0.re.to_bits() &&
+        self.0.im.to_bits() == other.0.im.to_bits()
+    }
+}
+
+impl Eq for HashableComplex {}
+
+impl Hash for HashableComplex {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.re.to_bits().hash(state);
+        self.0.im.to_bits().hash(state);
     }
 }
 
 pub type ComplexId = usize;
 
-#[derive(Debug, Clone)]
 pub struct ComplexTable {
-    i2complex: Vec<ComplexVal>,
-    complex2i: HashMap<ComplexVal, ComplexId>,
+    i2complex: Vec<Complex>,
+    complex2i: HashMap<HashableComplex, ComplexId>,
+    tolerance: f64,
     sums: HashMap<(ComplexId, ComplexId), ComplexId>,
     prods: HashMap<(ComplexId, ComplexId), ComplexId>,
     quots: HashMap<(ComplexId, ComplexId), ComplexId>,
 }
 
 impl ComplexTable {
-    pub const ZERO: ComplexId = 0;    // 0 + 0j
-    pub const ONE: ComplexId = 1;     // 1 + 0j
-    pub const A: ComplexId = 2;       // 1/sqrt(2) + 0j
-    pub const NEG_ONE: ComplexId = 3; // -1 + 0j
-    pub const I: ComplexId = 4;       // 0 + 1j
-    pub const NEG_I: ComplexId = 5;   // 0 - 1j
-    pub const NEG_A: ComplexId = 6;   // -1/sqrt(2) + 0j
-    pub const B: ComplexId = 7;       // 1/sqrt(2) + 1/sqrt(2)j
-    pub const C: ComplexId = 8;       // 1/sqrt(2) - 1/sqrt(2)j
+    pub const ZERO: ComplexId = 0;
+    pub const ONE: ComplexId = 1;
+    pub const I: ComplexId = 2;
+    pub const NEG_I: ComplexId = 3;
+    pub const A: ComplexId = 4;
+    pub const NEG_A: ComplexId = 5;
+    pub const NEG_ONE: ComplexId = 6;
 
-    pub fn new() -> Self {
+    pub fn new(tolerance: f64) -> Self {
         let mut table = Self {
             i2complex: Vec::new(),
             complex2i: HashMap::new(),
+            tolerance,
             sums: HashMap::new(),
             prods: HashMap::new(),
             quots: HashMap::new(),
@@ -149,30 +238,39 @@ impl ComplexTable {
         self.prods.clear();
         self.quots.clear();
 
-        self.intern(0, 0, 0, 0, 1);  // 0: ZERO
-        self.intern(1, 0, 0, 0, 1);  // 1: ONE
-        self.intern(0, 1, 0, 0, 1);  // 2: A
-        self.intern(-1, 0, 0, 0, 1); // 3: NEG_ONE
-        self.intern(0, 0, 1, 0, 1);  // 4: I
-        self.intern(0, 0, -1, 0, 1); // 5: NEG_I
-        self.intern(0, -1, 0, 0, 1); // 6: NEG_A
-        self.intern(0, 1, 0, 1, 1);  // 7: B
-        self.intern(0, 1, 0, -1, 1); // 8: C
+        self.intern(Complex::ZERO);
+        self.intern(Complex::ONE);
+        self.intern(Complex::I);
+        self.intern(Complex::NEG_I);
+        self.intern(Complex::A);
+        self.intern(Complex::NEG_A);
+        self.intern(Complex::NEG_ONE);
     }
 
-    pub fn intern(&mut self, a: i128, b: i128, c: i128, d: i128, e: i128) -> ComplexId {
-        let val = ComplexVal::new(a, b, c, d, e);
-        if let Some(&id) = self.complex2i.get(&val) {
+    /// Snaps a float value to the tolerance grid for approximate merging
+    fn snap(&self, val: f64) -> f64 {
+        if val == 0.0 {
+            return 0.0;
+        }
+        (val / self.tolerance).round() * self.tolerance
+    }
+
+    pub fn intern(&mut self, c: Complex) -> ComplexId {
+        let snapped = Complex::new(self.snap(c.re), self.snap(c.im));
+        let wrapped = HashableComplex(snapped);
+
+        if let Some(&id) = self.complex2i.get(&wrapped) {
             return id;
         }
+
         let id = self.i2complex.len();
-        self.i2complex.push(val);
-        self.complex2i.insert(val, id);
+        self.i2complex.push(snapped);
+        self.complex2i.insert(wrapped, id);
         id
     }
 
     #[inline]
-    pub fn get(&self, id: ComplexId) -> ComplexVal {
+    pub fn get(&self, id: ComplexId) -> Complex {
         self.i2complex[id]
     }
 
@@ -187,19 +285,10 @@ impl ComplexTable {
             return cached;
         }
 
-        let lhs = self.i2complex[first];
-        let rhs = self.i2complex[second];
-
-        let res = self.intern(
-            lhs.e * rhs.a + rhs.e * lhs.a,
-            lhs.e * rhs.b + rhs.e * lhs.b,
-            lhs.e * rhs.c + rhs.e * lhs.c,
-            lhs.e * rhs.d + rhs.e * lhs.d,
-            lhs.e * rhs.e,
-        );
-
-        self.sums.insert((first, second), res);
-        res
+        let res_val = self.i2complex[first] + self.i2complex[second];
+        let res_id = self.intern(res_val);
+        self.sums.insert((first, second), res_id);
+        res_id
     }
 
     pub fn mul(&mut self, first: ComplexId, second: ComplexId) -> ComplexId {
@@ -216,28 +305,15 @@ impl ComplexTable {
             return cached;
         }
 
-        let lhs = self.i2complex[first];
-        let rhs = self.i2complex[second];
-
-        let res = self.intern(
-            2 * lhs.a * rhs.a + rhs.b * lhs.b - 2 * lhs.c * rhs.c - lhs.d * rhs.d,
-            2 * (lhs.a * rhs.b + rhs.a * lhs.b - lhs.c * rhs.d - rhs.c * lhs.d),
-            2 * lhs.a * rhs.c + 2 * rhs.a * lhs.c + lhs.b * rhs.d + rhs.b * lhs.d,
-            2 * (lhs.a * rhs.d + rhs.a * lhs.d + lhs.b * rhs.c + rhs.b * lhs.c),
-            2 * lhs.e * rhs.e,
-        );
-
-        self.prods.insert((first, second), res);
-        res
-    }
-
-    pub fn mul3(&mut self, a: ComplexId, b: ComplexId, c: ComplexId) -> ComplexId {
-        let ab = self.mul(a, b);
-        self.mul(ab, c)
+        let res_val = self.i2complex[first] * self.i2complex[second];
+        let res_id = self.intern(res_val);
+        self.prods.insert((first, second), res_id);
+        res_id
     }
 
     pub fn div(&mut self, num: ComplexId, den: ComplexId) -> ComplexId {
-        assert!(den != Self::ZERO, "Error in ComplexTable::div(): Division by zero.");
+        let den_val = self.i2complex[den];
+        assert!(den_val.norm_sqr() > 1e-15, "Division by zero in ComplexTable::div()");
         if num == Self::ZERO || den == Self::ONE {
             return num;
         }
@@ -248,48 +324,27 @@ impl ComplexTable {
             return cached;
         }
 
-        let lhs = self.i2complex[num];
-        let rhs = self.i2complex[den];
-
-        let temp1 = 2 * (rhs.a * rhs.a + rhs.c * rhs.c) + rhs.b * rhs.b + rhs.d * rhs.d;
-        let temp2 = rhs.a * rhs.b + rhs.c * rhs.d;
-        let temp3 = 2 * (lhs.a * rhs.a + lhs.c * rhs.c) + lhs.b * rhs.b + lhs.d * rhs.d;
-        let temp4 = 2 * (lhs.a * rhs.b + lhs.b * rhs.a + lhs.c * rhs.d + lhs.d * rhs.d);
-        let temp5 = 2 * (lhs.c * rhs.a - lhs.a * rhs.c) + lhs.d * rhs.b - lhs.b * rhs.d;
-        let temp6 = 2 * (lhs.c * rhs.b + lhs.d * rhs.a - lhs.a * rhs.d - lhs.b * rhs.c);
-
-        let res = self.intern(
-            rhs.e * (temp1 * temp3 - 2 * temp2 * temp4),
-            rhs.e * (temp1 * temp4 - 4 * temp2 * temp3),
-            rhs.e * (temp1 * temp5 - 2 * temp2 * temp6),
-            rhs.e * (temp1 * temp6 - 4 * temp2 * temp5),
-            lhs.e * (temp1 * temp1 - 8 * temp2 * temp2),
-        );
-
-        self.quots.insert((num, den), res);
-        res
+        let res_val = self.i2complex[num] / den_val;
+        let res_id = self.intern(res_val);
+        self.quots.insert((num, den), res_id);
+        res_id
     }
 
-    pub fn argmax(&self, indices: &[ComplexId], tolerance: f64) -> ComplexId {
-        assert!(!indices.is_empty(), "Error in ComplexTable::argmax(): No values passed.");
+    pub fn argmax(&self, indices: &[ComplexId]) -> ComplexId {
+        assert!(!indices.is_empty(), "No values passed to argmax()");
         let mut greatest = indices[0];
-        let mut max = if indices.len() > 1 {
-            self.i2complex[greatest].mag2()
-        } else {
-            0.0
-        };
+        let mut max = self.i2complex[greatest].norm_sqr();
 
         for &idx in &indices[1..] {
-            let mag = self.i2complex[idx].mag2();
-            if mag - max > tolerance {
+            let norm = self.i2complex[idx].norm_sqr();
+            if norm - max > self.tolerance {
                 greatest = idx;
-                max = mag;
+                max = norm;
             }
         }
         greatest
     }
 }
-
 // ============================================================================
 // 2. QMDD Vertices, Edges, and Simulator
 // ============================================================================
@@ -362,7 +417,7 @@ impl Qmdd {
     pub fn new(num_vars: usize) -> Self {
         let mut sim = Self {
             num_vars,
-            complex: ComplexTable::new(),
+            complex: ComplexTable::new(1e-12),
             vertices: Vec::new(),
             unique_table: HashMap::new(),
             sums: HashMap::new(),
@@ -412,8 +467,8 @@ impl Qmdd {
             let v = &self.vertices[v_id];
             if v.edges.is_terminal() {
                 let c = self.complex.get(w);
-                let re = (c.re() * pad).round() / pad;
-                let im = (c.im() * pad).round() / pad;
+                let re = (c.re * pad).round() / pad;
+                let im = (c.im * pad).round() / pad;
                 results.push((s, re, im));
                 continue;
             }
@@ -433,9 +488,9 @@ impl Qmdd {
         results
     }
 
-    fn reconstruct_state(&mut self) -> Vec<ComplexVal> {
+    fn reconstruct_state(&mut self) -> Vec<Complex> {
         let dim = 1 << self.num_vars;
-        let mut output = vec![ComplexVal::new(0, 0, 0, 0, 1); dim];
+        let mut output = vec![Complex::new(0.0, 0.0); dim];
                 
         for state in 0..dim {
             let mut value = self.state.weight;
@@ -470,13 +525,10 @@ impl Qmdd {
         }
         let lhs = self.complex.get(a);
         let rhs = self.complex.get(b);
-        let val = ComplexVal::new(
-            2 * lhs.a * rhs.a + rhs.b * lhs.b - 2 * lhs.c * rhs.c - lhs.d * rhs.d,
-            2 * (lhs.a * rhs.b + rhs.a * lhs.b - lhs.c * rhs.d - rhs.c * lhs.d),
-            2 * lhs.a * rhs.c + 2 * rhs.a * lhs.c + lhs.b * rhs.d + rhs.b * lhs.d,
-            2 * (lhs.a * rhs.d + rhs.a * lhs.d + lhs.b * rhs.c + rhs.b * lhs.c),
-            2 * lhs.e * rhs.e,
-        );
+        let val = HashableComplex(Complex::new(
+            lhs.re * rhs.re - lhs.im * rhs.im,
+            lhs.re * rhs.im + lhs.im * rhs.re,
+        ));
         self.complex.complex2i[&val]
     }
 
@@ -498,23 +550,14 @@ impl Qmdd {
         id
     }
 
-    fn normalize(&mut self, edges: &mut Edges, rule: NormRule) -> (ComplexId, f64) {
+    fn normalize(&mut self, edges: &mut Edges) -> (ComplexId, f64) {
         let slice = edges.as_slice();
         if slice.is_empty() {
             return (ComplexTable::ONE, 1.0);
         }
 
-        let factor = match rule {
-            NormRule::FirstNonZero => slice
-                .iter()
-                .find(|e| e.weight != ComplexTable::ZERO)
-                .map(|e| e.weight)
-                .unwrap_or(ComplexTable::ZERO),
-            NormRule::MaxMagnitude => {
-                let weights: Vec<ComplexId> = slice.iter().map(|e| e.weight).collect();
-                self.complex.argmax(&weights, 0.000001)
-            }
-        };
+        let weights: Vec<ComplexId> = slice.iter().map(|e| e.weight).collect();
+        let factor = self.complex.argmax(&weights);
 
         if factor != ComplexTable::ZERO {
             match edges {
@@ -534,8 +577,8 @@ impl Qmdd {
 
         let prob = match edges {
             Edges::Vector(arr) => {
-                let p0 = self.vertices[arr[0].dest].prob * self.complex.get(arr[0].weight).mag2();
-                let p1 = self.vertices[arr[1].dest].prob * self.complex.get(arr[1].weight).mag2();
+                let p0 = self.vertices[arr[0].dest].prob * self.complex.get(arr[0].weight).norm_sqr();
+                let p1 = self.vertices[arr[1].dest].prob * self.complex.get(arr[1].weight).norm_sqr();
                 p0 + p1
             }
             _ => 1.0,
@@ -543,7 +586,7 @@ impl Qmdd {
 
         (factor, prob)
     }
-
+    
     fn is_trivial(edges: &Edges) -> bool {
         if let Edges::Matrix(e) = edges {
             e[0].weight == e[3].weight
@@ -565,20 +608,14 @@ impl Qmdd {
         }
     }
 
-    fn create_vertex(&mut self, variable: usize, mut edges: Edges, rule: NormRule) -> Edge {
-        let (weight, prob) = self.normalize(&mut edges, rule);
+    fn create_vertex(&mut self, variable: usize, mut edges: Edges) -> Edge {
+        let (weight, prob) = self.normalize(&mut edges);
 
-        if weight == ComplexTable::ZERO {
+        let factor_val = self.complex.get(weight);
+        if factor_val.norm_sqr() < 1e-15 {
             return Edge {
                 dest: self.terminal,
                 weight: ComplexTable::ZERO,
-            };
-        }
-
-        if Self::is_trivial(&edges) || Self::is_redundant(&edges) {
-            return Edge {
-                dest: edges.as_slice()[0].dest,
-                weight,
             };
         }
 
@@ -614,7 +651,7 @@ impl Qmdd {
         };
 
         for variable in (0..self.num_vars).rev() {
-            e = self.create_vertex(variable, Edges::Vector([e, zero_edge]), NormRule::MaxMagnitude);
+            e = self.create_vertex(variable, Edges::Vector([e, zero_edge]));
         }
         e
     }
@@ -669,7 +706,7 @@ impl Qmdd {
             Edges::Matrix([new_edges[0], new_edges[1], new_edges[2], new_edges[3]])
         };
 
-        let res = self.create_vertex(level, edges, NormRule::MaxMagnitude);
+        let res = self.create_vertex(level, edges);
         self.sums.insert(cache_key, res);
         res
     }
@@ -740,10 +777,11 @@ impl Qmdd {
             }
         }
 
-        let e = self.create_vertex(level, Edges::Vector(edges), NormRule::MaxMagnitude);
+        let e = self.create_vertex(level, Edges::Vector(edges));
+        let tmp = self.complex.mul(e.weight, matrix.weight);
         let res = Edge {
             dest: e.dest,
-            weight: self.complex.mul3(e.weight, matrix.weight, vector.weight),
+            weight: self.complex.mul(tmp, vector.weight),
         };
         self.prods.insert(cache_key, res);
         res
@@ -783,14 +821,14 @@ impl Qmdd {
                     reusable[3] = root[edge_idx];
                     reusable[0] = if i == j { one_edge } else { zero_edge };
                     root[edge_idx] =
-                        self.create_vertex(ctrl_idx, Edges::Matrix(reusable), NormRule::MaxMagnitude);
+                        self.create_vertex(ctrl_idx, Edges::Matrix(reusable));
                 }
             }
             q += 1;
         }
 
         // Target vertex
-        let mut entry = self.create_vertex(target, Edges::Matrix(root), NormRule::MaxMagnitude);
+        let mut entry = self.create_vertex(target, Edges::Matrix(root));
 
         // Controls above target (index < target), all-if-true (activator = 3, antiactivator = 0)
         while q < ctrls.len() {
@@ -798,7 +836,7 @@ impl Qmdd {
             let mut reusable = [zero_edge; 4];
             reusable[3] = entry;
             reusable[0] = one_edge;
-            entry = self.create_vertex(ctrl_idx, Edges::Matrix(reusable), NormRule::MaxMagnitude);
+            entry = self.create_vertex(ctrl_idx, Edges::Matrix(reusable));
             q += 1;
         }
 
@@ -832,19 +870,23 @@ impl QuantumExecution for Qmdd {
     }
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(phase_matrix(lambda), target, control);
+        let m = phase_matrix(lambda, &mut self.complex);
+        self.apply_gate(m, target, control);
     }
 
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(rx_matrix(theta), target, control);
+        let m = rx_matrix(theta, &mut self.complex);
+        self.apply_gate(m, target, control);
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(ry_matrix(theta), target, control);
+        let m = ry_matrix(theta, &mut self.complex);
+        self.apply_gate(m, target, control);
     }
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(rz_matrix(theta), target, control);
+        let m = rz_matrix(theta, &mut self.complex);
+        self.apply_gate(m, target, control);
     }
 
     // Measurements
@@ -898,8 +940,8 @@ impl QuantumExecution for Qmdd {
                 .unwrap_or(0);
 
             basis_states.push(vec![projected_state]);
-            amplitudes_real.push(amp.re());
-            amplitudes_imag.push(amp.im());
+            amplitudes_real.push(amp.re);
+            amplitudes_imag.push(amp.im);
         }
 
         DumpData {
