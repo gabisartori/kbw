@@ -106,6 +106,16 @@ impl ComplexVal {
         let i = self.im();
         r * r + i * i
     }
+
+    pub fn from_float(x: f64, real: bool) -> Self {
+        let p = (x * 1e4).round() as i128;
+        let q = 1e4 as i128;
+        if real {
+            Self { a: p, b: 0, c: 0, d: 0, e: q }
+        } else {
+            Self { a: 0, b: 0, c: p, d: 0, e: q }
+        }
+    }
 }
 
 pub type ComplexId = usize;
@@ -962,7 +972,11 @@ mod tests {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
-        println!("H1 state: {:?}", state);
+        let expected = vec![
+            ComplexVal::new(0, 1, 0, 0, 1),
+            ComplexVal::new(0, 1, 0, 0, 1)
+        ];
+        assert_eq!(state, expected);
     }
 
     #[test]
@@ -971,7 +985,13 @@ mod tests {
         sim.hadamard(0, &[]);
         sim.hadamard(1, &[]);
         let state = sim.reconstruct_state();
-        println!("H2 state: {:?}", state);
+        let expected = vec![
+            ComplexVal::new(1, 0, 0, 0, 2), // |00> amplitude (1/2)
+            ComplexVal::new(1, 0, 0, 0, 2), // |01> amplitude (1/2)
+            ComplexVal::new(1, 0, 0, 0, 2), // |10> amplitude (1/2)
+            ComplexVal::new(1, 0, 0, 0, 2), // |11> amplitude (1/2)
+        ];
+        assert_eq!(state, expected);
     }
 
     #[test]
@@ -980,19 +1000,38 @@ mod tests {
         sim.hadamard(0, &[]);
         sim.pauli_x(1, &[0]);
         let state = sim.reconstruct_state();
-        println!("Bell state: {:?}", state);
+        let expected = vec![
+            ComplexVal::new(0, 1, 0, 0, 1), // |00> amplitude (sqrt(2)/2)
+            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
+            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
+            ComplexVal::new(0, 1, 0, 0, 1), // |11> amplitude (sqrt(2)/2)
+        ];
+        assert_eq!(state, expected);
     }
 
     #[test]
     fn measure_collapse_hadamard() {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
-        println!("Before measurement: {:?}", sim.reconstruct_state());
+        let state = sim.reconstruct_state();
+        let expected = vec![
+            ComplexVal::new(0, 1, 0, 0, 1), // |0> amplitude (sqrt(2)/2)
+            ComplexVal::new(0, 1, 0, 0, 1), // |1> amplitude (sqrt(2)/2)
+        ];
+        assert_eq!(state, expected);
+
         let p1 = sim.measure_p1(0);
+        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
         let p = 1.0/p1.sqrt();
         sim.measure_collapse(0, true, p);
         let p1 = sim.measure_p1(0);
-        println!("After measurement: {:?}", sim.reconstruct_state());
+        let state = sim.reconstruct_state();
+        let expected = vec![
+            ComplexVal::new(0, 0, 0, 0, 1), // |0> amplitude (1)
+            ComplexVal::new(1, 0, 0, 0, 1), // |1> amplitude (0)
+        ];
+        assert_eq!(state, expected);
+        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
     }
 
     #[test]
@@ -1000,13 +1039,30 @@ mod tests {
         let mut sim = Qmdd::new(2);
         sim.hadamard(0, &[]);
         sim.pauli_x(1, &[0]);
+
+        let state = sim.reconstruct_state();
+        let expected = vec![
+            ComplexVal::new(0, 1, 0, 0, 1), // |00> amplitude (sqrt(2)/2)
+            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
+            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
+            ComplexVal::new(0, 1, 0, 0, 1), // |11> amplitude (sqrt(2)/2)
+        ];
         let p1 = sim.measure_p1(0);
+        assert_eq!(state, expected);
+        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
+
+        // Collapse the superposition to |11>
         let p = 1.0/p1.sqrt();
-        // assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
-        println!("Before measurement: {:?}", sim.reconstruct_state());
         sim.measure_collapse(0, true, p);
-        let p1 = sim.measure_p1(1);
-        // assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
-        println!("After measurement: {:?}", sim.reconstruct_state());
+        let state = sim.reconstruct_state();
+        let expected = vec![
+            ComplexVal::new(0, 0, 0, 0, 1), // |00> amplitude (0)
+            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
+            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
+            ComplexVal::new(1, 0, 0, 0, 1), // |11> amplitude (1)
+        ];
+        let p1 = sim.measure_p1(0);
+        assert_eq!(state, expected);
+        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
     }
 }
