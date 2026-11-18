@@ -160,6 +160,11 @@ impl ComplexTable {
         self.intern(0, 1, 0, -1, 1); // 8: C
     }
 
+    pub fn from_float(&mut self, x: f64, real: bool) -> ComplexId {
+        let x = ComplexVal::from_float(x, real);
+        self.intern(x.a, x.b, x.c, x.d, x.e)
+    }
+
     pub fn intern(&mut self, a: i128, b: i128, c: i128, d: i128, e: i128) -> ComplexId {
         let val = ComplexVal::new(a, b, c, d, e);
         if let Some(&id) = self.complex2i.get(&val) {
@@ -806,7 +811,8 @@ impl Qmdd {
     }
 
     fn renormalize(&mut self, p: f64) {
-        // self.state.weight = self.complex.mul_f64(self.state.weight, p);
+        let p = self.complex.from_float(p, true);
+        self.state.weight = self.complex.mul(self.state.weight, p);
     }
 }
 
@@ -832,19 +838,52 @@ impl QuantumExecution for Qmdd {
     }
 
     fn phase(&mut self, lambda: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(phase_matrix(lambda), target, control);
+        let c = self.complex.from_float(lambda.cos(), true);
+        let s = self.complex.from_float(lambda.sin(), false);
+        let p = self.complex.add(c, s);
+        let phase_matrix = [
+            ComplexTable::ONE,
+            ComplexTable::ZERO,
+            ComplexTable::ZERO,
+            p
+        ];
+        self.apply_gate(phase_matrix, target, control);
     }
 
+    // TODO: Implement Rz as a phase gate, and Rx/Ry as a combination of H and Rz.
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(rx_matrix(theta), target, control);
+        let t = theta/2.0;
+        let c = self.complex.from_float(t.cos(), true);
+        let s = self.complex.from_float(-t.sin(), false);
+        let rx = [
+            c, s,
+            s, c
+        ];
+        self.apply_gate(rx, target, control);
     }
 
     fn ry(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(ry_matrix(theta), target, control);
+        let t = theta/2.0;
+        let c = self.complex.from_float(t.cos(), true);
+        let s = self.complex.from_float(t.sin(), true);
+        let sm = self.complex.from_float(-t.sin(), true);
+        let ry = [
+            c, sm,
+            s, c
+        ];
+        self.apply_gate(ry, target, control);
     }
 
     fn rz(&mut self, theta: f64, target: usize, control: &[usize]) {
-        // self.apply_gate(rz_matrix(theta), target, control);
+        let t = theta/2.0;
+        let c = self.complex.from_float(t.cos(), true);
+        let s = self.complex.from_float(t.sin(), false);
+        let sm = self.complex.from_float(-t.sin(), false);
+        let rz = [
+            c, sm,
+            s, c
+        ];
+        self.apply_gate(rz, target, control);
     }
 
     // Measurements
