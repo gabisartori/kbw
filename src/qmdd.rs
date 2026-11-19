@@ -4,6 +4,8 @@ use crate::quantum_execution::QuantumExecution;
 use ket::error::KetError;
 use ket::execution::DumpData;
 
+use num::{BigInt, Integer};
+use num_traits::{Signed, ToPrimitive, Zero};
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
@@ -66,6 +68,26 @@ fn gcd_two(mut a: i128, mut b: i128) -> i128 {
 
 fn gcd_five(a: i128, b: i128, c: i128, d: i128, e: i128) -> i128 {
     gcd_two(gcd_two(gcd_two(gcd_two(a, b), c), d), e)
+}
+
+fn normalize_bigints(values: [BigInt; 5]) -> [i128; 5] {
+    let mut gcd = values[0].clone().abs();
+    for value in values.iter().skip(1) {
+        gcd = gcd.gcd(&value.clone().abs());
+    }
+
+    if values[4].is_zero() {
+        panic!("Error in ComplexTable::div(): Division by zero.");
+    }
+    if values[4].is_negative() {
+        gcd = -gcd;
+    }
+
+    values.map(|value| {
+        (value / &gcd)
+            .to_i128()
+            .expect("ComplexTable::div(): Result exceeds the supported i128 range.")
+    })
 }
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -313,20 +335,28 @@ impl ComplexTable {
         let lhs = self.i2complex[num];
         let rhs = self.i2complex[den];
 
-        let temp1 = 2 * (rhs.a * rhs.a + rhs.c * rhs.c) + rhs.b * rhs.b + rhs.d * rhs.d;
-        let temp2 = rhs.a * rhs.b + rhs.c * rhs.d;
-        let temp3 = 2 * (lhs.a * rhs.a + lhs.c * rhs.c) + lhs.b * rhs.b + lhs.d * rhs.d;
-        let temp4 = 2 * (lhs.a * rhs.b + lhs.b * rhs.a + lhs.c * rhs.d + lhs.d * rhs.d);
-        let temp5 = 2 * (lhs.c * rhs.a - lhs.a * rhs.c) + lhs.d * rhs.b - lhs.b * rhs.d;
-        let temp6 = 2 * (lhs.c * rhs.b + lhs.d * rhs.a - lhs.a * rhs.d - lhs.b * rhs.c);
+        let lhs_e = lhs.e;
+        let rhs_e = rhs.e;
+        let lhs = [lhs.a, lhs.b, lhs.c, lhs.d].map(BigInt::from);
+        let rhs = [rhs.a, rhs.b, rhs.c, rhs.d].map(BigInt::from);
+        let [la, lb, lc, ld] = lhs;
+        let [ra, rb, rc, rd] = rhs;
 
-        let res = self.intern(
-            rhs.e * (temp1 * temp3 - 2 * temp2 * temp4),
-            rhs.e * (temp1 * temp4 - 4 * temp2 * temp3),
-            rhs.e * (temp1 * temp5 - 2 * temp2 * temp6),
-            rhs.e * (temp1 * temp6 - 4 * temp2 * temp5),
-            lhs.e * (temp1 * temp1 - 8 * temp2 * temp2),
-        );
+        let temp1 = 2 * (&ra * &ra + &rc * &rc) + &rb * &rb + &rd * &rd;
+        let temp2 = &ra * &rb + &rc * &rd;
+        let temp3 = 2 * (&la * &ra + &lc * &rc) + &lb * &rb + &ld * &rd;
+        let temp4 = 2 * (&la * &rb + &lb * &ra + &lc * &rd + &ld * &rd);
+        let temp5 = 2 * (&lc * &ra - &la * &rc) + &ld * &rb - &lb * &rd;
+        let temp6 = 2 * (&lc * &rb + &ld * &ra - &la * &rd - &lb * &rc);
+
+        let [a, b, c, d, e] = normalize_bigints([
+            BigInt::from(rhs_e) * (&temp1 * &temp3 - 2 * &temp2 * &temp4),
+            BigInt::from(rhs_e) * (&temp1 * &temp4 - 4 * &temp2 * &temp3),
+            BigInt::from(rhs_e) * (&temp1 * &temp5 - 2 * &temp2 * &temp6),
+            BigInt::from(rhs_e) * (&temp1 * &temp6 - 4 * &temp2 * &temp5),
+            BigInt::from(lhs_e) * (&temp1 * &temp1 - 8 * &temp2 * &temp2),
+        ]);
+        let res = self.intern(a, b, c, d, e);
 
         self.quots.insert((num, den), res);
         res
@@ -1191,18 +1221,18 @@ mod tests {
 
     #[test]
     fn grover() {
-        let size = 6;
+        let size = 7;
         let mut sim = Qmdd::new(size);
-        let marked_state = 17;
+        let marked_state: usize = 17;
         let qubits: Vec<usize> = (0..size).collect();
         let controls_0_to_n_minus_1: Vec<usize> = (0..size - 1).collect();
 
-        // 1. Initial superposition across all 5 qubits
+        // 1. Initial superposition across all qubits
         for &q in &qubits {
             sim.hadamard(q, &[]);
         }
 
-        // 2. Grover iterations: floor((pi / 4) * sqrt(32)) == 4
+        // 2. Grover iterations: floor((pi / 4) * sqrt(2^size))
         let iterations = ((std::f64::consts::PI / 4.0) * (2.0_f64.powi(size as i32)).sqrt()) as usize;
 
         for _ in 0..iterations {
@@ -1212,7 +1242,7 @@ mod tests {
                     sim.pauli_x(q, &[]);
                 }
             }
-            // Multi-controlled Z on qubit 4 controlled by [0, 1, 2, 3]
+            // Multi-controlled Z on the last qubit, controlled by all preceding qubits.
             sim.hadamard(size-1, &[]);
             sim.pauli_x(size-1, &controls_0_to_n_minus_1);
             sim.hadamard(size-1, &[]);
@@ -1228,7 +1258,7 @@ mod tests {
                 sim.hadamard(q, &[]);
                 sim.pauli_x(q, &[]);
             }
-            // Multi-controlled Z on qubit 4 controlled by [0, 1, 2, 3]
+            // Multi-controlled Z on the last qubit, controlled by all preceding qubits.
             sim.hadamard(size-1, &[]);
             sim.pauli_x(size-1, &controls_0_to_n_minus_1);
             sim.hadamard(size-1, &[]);
@@ -1239,6 +1269,14 @@ mod tests {
             }
         }
 
-        println!("{:?}", sim.reconstruct_state());
+        let state = sim.reconstruct_state();
+        let marked_index = (0..size).fold(0, |index, bit| {
+            index | (((marked_state >> (size - 1 - bit)) & 1) << bit)
+        });
+        assert!(
+            state[marked_index].mag2() > 0.95,
+            "Grover should amplify the marked state; got probability {}",
+            state[marked_index].mag2()
+        );
     }
 }
