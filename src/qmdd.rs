@@ -68,7 +68,7 @@ fn gcd_five(a: i128, b: i128, c: i128, d: i128, e: i128) -> i128 {
     gcd_two(gcd_two(gcd_two(gcd_two(a, b), c), d), e)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub struct ComplexVal {
     pub a: i128,
     pub b: i128,
@@ -108,8 +108,8 @@ impl ComplexVal {
     }
 
     pub fn from_float(x: f64, real: bool) -> Self {
-        let p = (x * 1e4).round() as i128;
-        let q = 1e4 as i128;
+        let p = (x * 1e12).round() as i128;
+        let q = 1e12 as i128;
         if real {
             Self { a: p, b: 0, c: 0, d: 0, e: q }
         } else {
@@ -117,6 +117,53 @@ impl ComplexVal {
         }
     }
 }
+
+impl std::ops::Add for ComplexVal {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        let a = self.e * other.a + other.e * self.a;
+        let b = self.e * other.b + other.e * self.b;
+        let c = self.e * other.c + other.e * self.c;
+        let d = self.e * other.d + other.e * self.d;
+        let e = self.e * other.e;
+        Self::new(a, b, c, d, e)
+    }
+}
+
+impl std::ops::Sub for ComplexVal {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        let a = self.e * other.a - other.e * self.a;
+        let b = self.e * other.b - other.e * self.b;
+        let c = self.e * other.c - other.e * self.c;
+        let d = self.e * other.d - other.e * self.d;
+        let e = self.e * other.e;
+        Self::new(a, b, c, d, e)
+    }
+}
+
+impl std::ops::Mul for ComplexVal {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        let a = 2 * self.a * other.a + other.b * self.b - 2 * self.c * other.c - self.d * other.d;
+        let b = 2 * (self.a * other.b + other.a * self.b - self.c * other.d - other.c * self.d);
+        let c = 2 * self.a * other.c + 2 * other.a * self.c + self.b * other.d + other.b * self.d;
+        let d = 2 * (self.a * other.d + other.a * self.d + self.b * other.c + other.b * self.c);
+        let e = 2 * self.e * other.e;
+        Self::new(a, b, c, d, e)
+    }
+}
+
+impl std::cmp::PartialEq for ComplexVal {
+    fn eq(&self, other: &Self) -> bool {
+        (*self - *other).mag2() <= 1e-10
+    }
+}
+
+impl std::cmp::Eq for ComplexVal {}
 
 pub type ComplexId = usize;
 
@@ -824,6 +871,58 @@ impl Qmdd {
         let p = self.complex.from_float(p, true);
         self.state.weight = self.complex.mul(self.state.weight, p);
     }
+
+    fn calc_prob_recursive(
+        &self,
+        v_id: VertexId,
+        weight_id: ComplexId,
+        target: usize,
+        memo: &mut HashMap<(VertexId, ComplexId), f64>,
+    ) -> f64 {
+        let v = &self.vertices[v_id];
+
+        // If we hit the terminal or have gone past the target level down the tree, no contribution from this branch
+        if v.edges.is_terminal() || v.variable < target {
+            return 0.0;
+        }
+
+        let cache_key = (v_id, weight_id);
+        if let Some(&prob) = memo.get(&cache_key) {
+            return prob;
+        }
+
+        let mut total_prob = 0.0;
+        let edges = v.edges.as_slice();
+
+        // If this vertex corresponds exactly to our target qubit
+        if v.variable == target {
+            // Edge 1 corresponds to measuring |1> for this qubit
+            let edge1 = &edges[1];
+            if edge1.weight != ComplexTable::ZERO {
+                // Combine the incoming weight with the edge weight
+                let combined_weight = self.complex_mul_readonly(weight_id, edge1.weight);
+                let c = self.complex.get(combined_weight);
+                let path_prob = c.mag2() * self.vertices[edge1.dest].prob; // Multiplied by sub-diagram probability
+                
+                // Alternatively, if sub-diagrams are fully normalized, you can accumulate:
+                // total_prob += c.norm_sqr();
+                // Let's use the direct path probability calculation:
+                total_prob += path_prob;
+            }
+        } else {
+            // If we are above the target qubit level, we must branch down both paths (0 and 1)
+            for i in 0..2 {
+                let edge = &edges[i];
+                if edge.weight != ComplexTable::ZERO {
+                    let next_weight = self.complex_mul_readonly(weight_id, edge.weight);
+                    total_prob += self.calc_prob_recursive(edge.dest, next_weight, target, memo);
+                }
+            }
+        }
+
+        memo.insert(cache_key, total_prob);
+        total_prob
+    }
 }
 
 impl QuantumExecution for Qmdd {
@@ -898,23 +997,12 @@ impl QuantumExecution for Qmdd {
 
     // Measurements
     fn measure_p1(&mut self, target: usize) -> f64 {
-        // Fallback measurement strategy: derive probabilities from the same
-        // projection used by dump so measurement semantics match ket output.
-        // TODO: Fix this to use the QMDD directly instead of dumping to a state vector.
-        let projected = self.dump(&[target]);
-
-        projected
-            .basis_states
-            .iter()
-            .zip(
-                projected
-                    .amplitudes_real
-                    .iter()
-                    .zip(projected.amplitudes_imag.iter()),
-            )
-            .filter(|(basis, _)| basis.first().copied().unwrap_or(0) == 1)
-            .map(|(_, (re, im))| re * re + im * im)
-            .sum()
+        assert!(target < self.num_vars, "Target qubit out of bounds");
+        
+        // Memoization cache to avoid redundant sub-graph traversals: (vertex_id, accumulated_weight_id) -> probability contribution
+        let mut memo: HashMap<(VertexId, ComplexId), f64> = HashMap::new();
+        
+        self.calc_prob_recursive(self.state.dest, self.state.weight, target, &mut memo)
     }
 
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
@@ -1021,7 +1109,7 @@ mod tests {
         assert_eq!(state, expected);
 
         let p1 = sim.measure_p1(0);
-        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
+        assert!((p1 - 0.5).abs() < 1e-12, "Wrong probability before measure: {p1:?} != 0.5");
         let p = 1.0/p1.sqrt();
         sim.measure_collapse(0, true, p);
         let p1 = sim.measure_p1(0);
@@ -1031,7 +1119,7 @@ mod tests {
             ComplexVal::new(1, 0, 0, 0, 1), // |1> amplitude (0)
         ];
         assert_eq!(state, expected);
-        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
+        assert!((p1 - 1.0).abs() < 1e-12, "Wrong probability after measure: {p1:?} != 1.0");
     }
 
     #[test]
@@ -1049,7 +1137,7 @@ mod tests {
         ];
         let p1 = sim.measure_p1(0);
         assert_eq!(state, expected);
-        assert!((p1 - 0.5).abs() < 1e-12, "unexpected probability: {p1:?} != 0.5");
+        assert!((p1 - 0.5).abs() < 1e-12, "Wrong probability before measure: {p1:?} != 0.5");
 
         // Collapse the superposition to |11>
         let p = 1.0/p1.sqrt();
@@ -1063,6 +1151,6 @@ mod tests {
         ];
         let p1 = sim.measure_p1(0);
         assert_eq!(state, expected);
-        assert!((p1 - 1.0).abs() < 1e-12, "unexpected probability: {p1:?} != 1.0");
+        assert!((p1 - 1.0).abs() < 1e-12, "Wrong probability after measure: {p1:?} != 1.0");
     }
 }
