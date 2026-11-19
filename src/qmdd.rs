@@ -1013,6 +1013,7 @@ impl QuantumExecution for Qmdd {
         // self.root.weight = self.root.weight * Complex::<f64>::new(p, 0.0);
     }
 
+    // TODO: Replace this by a function that doesn't need 2^n vector for any ammount of qubits
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let output = self.reconstruct_state();
         let mut basis_states = Vec::new();
@@ -1020,8 +1021,7 @@ impl QuantumExecution for Qmdd {
         let mut amplitudes_imag = Vec::new();
 
         for (state, amp) in output.iter().enumerate() {
-            // let prob = amp.re * amp.re + amp.im * amp.im;
-            let prob = 0.0;
+            let prob = amp.mag2();
             if prob <= f64::EPSILON {
                 continue;
             }
@@ -1152,5 +1152,22 @@ mod tests {
         let p1 = sim.measure_p1(0);
         assert_eq!(state, expected);
         assert!((p1 - 1.0).abs() < 1e-12, "Wrong probability after measure: {p1:?} != 1.0");
+    }
+
+    #[test]
+    fn dump() {
+        let mut sim = Qmdd::new(2);
+        sim.hadamard(0, &[]);
+        sim.pauli_x(1, &[0]);
+        let dump = sim.dump(&[0, 1]);
+        assert_eq!(dump.basis_states.len(), 2);
+        assert_eq!(dump.amplitudes_real.len(), 2);
+        assert_eq!(dump.amplitudes_imag.len(), 2);
+        assert_eq!(dump.basis_states[0], vec![0]);
+        assert_eq!(dump.basis_states[1], vec![3]);
+        assert!((dump.amplitudes_real[0] - 0.7071067811865475).abs() < 1e-12);
+        assert!((dump.amplitudes_real[1] - 0.7071067811865475).abs() < 1e-12);
+        assert!((dump.amplitudes_imag[0] - 0.0).abs() < 1e-12);
+        assert!((dump.amplitudes_imag[1] - 0.0).abs() < 1e-12);
     }
 }
