@@ -1170,4 +1170,75 @@ mod tests {
         assert!((dump.amplitudes_imag[0] - 0.0).abs() < 1e-12);
         assert!((dump.amplitudes_imag[1] - 0.0).abs() < 1e-12);
     }
+
+    #[test]
+    fn big_hadamard() {
+        let start = std::time::Instant::now();
+        let size = 2500;
+        let mut sim = Qmdd::new(size);
+        for i in 0..size {
+            sim.hadamard(i, &[]);
+        }
+        let end = std::time::Instant::now();
+        println!("Time taken to simulate {} H gates: {:?}", size, end-start);
+        // let state = sim.reconstruct_state();
+        // let expected_amplitude = 1.0 / (2.0_f64).powi(size as i32 / 2);
+        // for amp in state {
+        //     assert!((amp.re() - expected_amplitude).abs() < 1e-12);
+        //     assert!((amp.im()).abs() < 1e-12);
+        // }
+    }
+
+    #[test]
+    fn grover() {
+        let size = 6;
+        let mut sim = Qmdd::new(size);
+        let marked_state = 17;
+        let qubits: Vec<usize> = (0..size).collect();
+        let controls_0_to_n_minus_1: Vec<usize> = (0..size - 1).collect();
+
+        // 1. Initial superposition across all 5 qubits
+        for &q in &qubits {
+            sim.hadamard(q, &[]);
+        }
+
+        // 2. Grover iterations: floor((pi / 4) * sqrt(32)) == 4
+        let iterations = ((std::f64::consts::PI / 4.0) * (2.0_f64.powi(size as i32)).sqrt()) as usize;
+
+        for _ in 0..iterations {
+            // --- Oracle: flip phase of `marked_state` ---
+            for (i, &q) in qubits.iter().enumerate() {
+                if ((marked_state >> (size - 1 - i)) & 1) == 0 {
+                    sim.pauli_x(q, &[]);
+                }
+            }
+            // Multi-controlled Z on qubit 4 controlled by [0, 1, 2, 3]
+            sim.hadamard(size-1, &[]);
+            sim.pauli_x(size-1, &controls_0_to_n_minus_1);
+            sim.hadamard(size-1, &[]);
+            // Uncompute X gates
+            for (i, &q) in qubits.iter().enumerate() {
+                if ((marked_state >> (size-1 - i)) & 1) == 0 {
+                    sim.pauli_x(q, &[]);
+                }
+            }
+
+            // --- Diffusion operator: invert about the mean ---
+            for &q in &qubits {
+                sim.hadamard(q, &[]);
+                sim.pauli_x(q, &[]);
+            }
+            // Multi-controlled Z on qubit 4 controlled by [0, 1, 2, 3]
+            sim.hadamard(size-1, &[]);
+            sim.pauli_x(size-1, &controls_0_to_n_minus_1);
+            sim.hadamard(size-1, &[]);
+            // Uncompute X and H gates
+            for &q in &qubits {
+                sim.pauli_x(q, &[]);
+                sim.hadamard(q, &[]);
+            }
+        }
+
+        println!("{:?}", sim.reconstruct_state());
+    }
 }
