@@ -4,10 +4,9 @@ use crate::quantum_execution::QuantumExecution;
 use ket::error::KetError;
 use ket::execution::DumpData;
 
-use num::{BigInt, Integer};
-use num_traits::{Signed, ToPrimitive, Zero};
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
+use std::hash::{Hash, Hasher};
 
 const PAULI_X_MATRIX: [ComplexId; 4] = [
     ComplexTable::ZERO,
@@ -51,76 +50,26 @@ const M1_MATRIX: [ComplexId; 4] = [
     ComplexTable::ONE
 ];
 
-// ============================================================================
-// 1. Exact Algebraic Complex Numbers: (A + B/sqrt(2) + C*j + D/sqrt(2)*j) / E
-// ============================================================================
-
-fn gcd_two(mut a: i128, mut b: i128) -> i128 {
-    a = a.abs();
-    b = b.abs();
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
-}
-
-fn gcd_five(a: i128, b: i128, c: i128, d: i128, e: i128) -> i128 {
-    gcd_two(gcd_two(gcd_two(gcd_two(a, b), c), d), e)
-}
-
-fn normalize_bigints(values: [BigInt; 5]) -> [i128; 5] {
-    let mut gcd = values[0].clone().abs();
-    for value in values.iter().skip(1) {
-        gcd = gcd.gcd(&value.clone().abs());
-    }
-
-    if values[4].is_zero() {
-        panic!("Error in ComplexTable::div(): Division by zero.");
-    }
-    if values[4].is_negative() {
-        gcd = -gcd;
-    }
-
-    values.map(|value| {
-        (value / &gcd)
-            .to_i128()
-            .expect("ComplexTable::div(): Result exceeds the supported i128 range.")
-    })
-}
-
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct ComplexVal {
-    pub a: i128,
-    pub b: i128,
-    pub c: i128,
-    pub d: i128,
-    pub e: i128,
+    pub real: f64,
+    pub imag: f64,
 }
 
 impl ComplexVal {
-    /// Creates a canonicalized complex value where gcd(a,b,c,d,e) == 1 and e > 0.
-    pub fn new(a: i128, b: i128, c: i128, d: i128, e: i128) -> Self {
-        assert!(e != 0, "Error in ComplexVal::new(): Division by zero.");
-        let g = gcd_five(a, b, c, d, e);
-        let sign = if e < 0 { -1 } else { 1 };
-        let f = g * sign;
+    pub fn new(real: f64, imag: f64) -> Self {
         Self {
-            a: a / f,
-            b: b / f,
-            c: c / f,
-            d: d / f,
-            e: e / f,
+            real: if real == 0.0 { 0.0 } else { real },
+            imag: if imag == 0.0 { 0.0 } else { imag },
         }
     }
 
     pub fn re(&self) -> f64 {
-        (self.a as f64 + (self.b as f64) * FRAC_1_SQRT_2) / (self.e as f64)
+        self.real
     }
 
     pub fn im(&self) -> f64 {
-        (self.c as f64 + (self.d as f64) * FRAC_1_SQRT_2) / (self.e as f64)
+        self.imag
     }
 
     pub fn mag2(&self) -> f64 {
@@ -130,12 +79,10 @@ impl ComplexVal {
     }
 
     pub fn from_float(x: f64, real: bool) -> Self {
-        let p = (x * 1e12).round() as i128;
-        let q = 1e12 as i128;
         if real {
-            Self { a: p, b: 0, c: 0, d: 0, e: q }
+            Self::new(x, 0.0)
         } else {
-            Self { a: 0, b: 0, c: p, d: 0, e: q }
+            Self::new(0.0, x)
         }
     }
 }
@@ -144,12 +91,7 @@ impl std::ops::Add for ComplexVal {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        let a = self.e * other.a + other.e * self.a;
-        let b = self.e * other.b + other.e * self.b;
-        let c = self.e * other.c + other.e * self.c;
-        let d = self.e * other.d + other.e * self.d;
-        let e = self.e * other.e;
-        Self::new(a, b, c, d, e)
+        Self::new(self.real + other.real, self.imag + other.imag)
     }
 }
 
@@ -157,12 +99,7 @@ impl std::ops::Sub for ComplexVal {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        let a = self.e * other.a - other.e * self.a;
-        let b = self.e * other.b - other.e * self.b;
-        let c = self.e * other.c - other.e * self.c;
-        let d = self.e * other.d - other.e * self.d;
-        let e = self.e * other.e;
-        Self::new(a, b, c, d, e)
+        Self::new(self.real - other.real, self.imag - other.imag)
     }
 }
 
@@ -170,22 +107,55 @@ impl std::ops::Mul for ComplexVal {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        let a = 2 * self.a * other.a + other.b * self.b - 2 * self.c * other.c - self.d * other.d;
-        let b = 2 * (self.a * other.b + other.a * self.b - self.c * other.d - other.c * self.d);
-        let c = 2 * self.a * other.c + 2 * other.a * self.c + self.b * other.d + other.b * self.d;
-        let d = 2 * (self.a * other.d + other.a * self.d + self.b * other.c + other.b * self.c);
-        let e = 2 * self.e * other.e;
-        Self::new(a, b, c, d, e)
+        Self::new(
+            self.real * other.real - self.imag * other.imag,
+            self.real * other.imag + self.imag * other.real,
+        )
     }
 }
 
-impl std::cmp::PartialEq for ComplexVal {
+impl std::ops::Div for ComplexVal {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self {
+        assert!(
+            other.real != 0.0 || other.imag != 0.0,
+            "Error in ComplexVal::div(): Division by zero."
+        );
+
+        if other.real.abs() >= other.imag.abs() {
+            let ratio = other.imag / other.real;
+            let denominator = other.real + other.imag * ratio;
+            Self::new(
+                (self.real + self.imag * ratio) / denominator,
+                (self.imag - self.real * ratio) / denominator,
+            )
+        } else {
+            let ratio = other.real / other.imag;
+            let denominator = other.imag + other.real * ratio;
+            Self::new(
+                (self.real * ratio + self.imag) / denominator,
+                (self.imag * ratio - self.real) / denominator,
+            )
+        }
+    }
+}
+
+impl PartialEq for ComplexVal {
     fn eq(&self, other: &Self) -> bool {
-        (*self - *other).mag2() <= 1e-10
+        self.real.to_bits() == other.real.to_bits()
+            && self.imag.to_bits() == other.imag.to_bits()
     }
 }
 
-impl std::cmp::Eq for ComplexVal {}
+impl Eq for ComplexVal {}
+
+impl Hash for ComplexVal {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.real.to_bits().hash(state);
+        self.imag.to_bits().hash(state);
+    }
+}
 
 pub type ComplexId = usize;
 
@@ -228,24 +198,24 @@ impl ComplexTable {
         self.prods.clear();
         self.quots.clear();
 
-        self.intern(0, 0, 0, 0, 1);  // 0: ZERO
-        self.intern(1, 0, 0, 0, 1);  // 1: ONE
-        self.intern(0, 1, 0, 0, 1);  // 2: A
-        self.intern(-1, 0, 0, 0, 1); // 3: NEG_ONE
-        self.intern(0, 0, 1, 0, 1);  // 4: I
-        self.intern(0, 0, -1, 0, 1); // 5: NEG_I
-        self.intern(0, -1, 0, 0, 1); // 6: NEG_A
-        self.intern(0, 1, 0, 1, 1);  // 7: B
-        self.intern(0, 1, 0, -1, 1); // 8: C
+        self.intern(0.0, 0.0); // 0: ZERO
+        self.intern(1.0, 0.0); // 1: ONE
+        self.intern(FRAC_1_SQRT_2, 0.0); // 2: A
+        self.intern(-1.0, 0.0); // 3: NEG_ONE
+        self.intern(0.0, 1.0); // 4: I
+        self.intern(0.0, -1.0); // 5: NEG_I
+        self.intern(-FRAC_1_SQRT_2, 0.0); // 6: NEG_A
+        self.intern(FRAC_1_SQRT_2, FRAC_1_SQRT_2); // 7: B
+        self.intern(FRAC_1_SQRT_2, -FRAC_1_SQRT_2); // 8: C
     }
 
     pub fn from_float(&mut self, x: f64, real: bool) -> ComplexId {
         let x = ComplexVal::from_float(x, real);
-        self.intern(x.a, x.b, x.c, x.d, x.e)
+        self.intern(x.real, x.imag)
     }
 
-    pub fn intern(&mut self, a: i128, b: i128, c: i128, d: i128, e: i128) -> ComplexId {
-        let val = ComplexVal::new(a, b, c, d, e);
+    pub fn intern(&mut self, real: f64, imag: f64) -> ComplexId {
+        let val = ComplexVal::new(real, imag);
         if let Some(&id) = self.complex2i.get(&val) {
             return id;
         }
@@ -274,13 +244,8 @@ impl ComplexTable {
         let lhs = self.i2complex[first];
         let rhs = self.i2complex[second];
 
-        let res = self.intern(
-            lhs.e * rhs.a + rhs.e * lhs.a,
-            lhs.e * rhs.b + rhs.e * lhs.b,
-            lhs.e * rhs.c + rhs.e * lhs.c,
-            lhs.e * rhs.d + rhs.e * lhs.d,
-            lhs.e * rhs.e,
-        );
+        let val = lhs + rhs;
+        let res = self.intern(val.real, val.imag);
 
         self.sums.insert((first, second), res);
         res
@@ -303,13 +268,8 @@ impl ComplexTable {
         let lhs = self.i2complex[first];
         let rhs = self.i2complex[second];
 
-        let res = self.intern(
-            2 * lhs.a * rhs.a + rhs.b * lhs.b - 2 * lhs.c * rhs.c - lhs.d * rhs.d,
-            2 * (lhs.a * rhs.b + rhs.a * lhs.b - lhs.c * rhs.d - rhs.c * lhs.d),
-            2 * lhs.a * rhs.c + 2 * rhs.a * lhs.c + lhs.b * rhs.d + rhs.b * lhs.d,
-            2 * (lhs.a * rhs.d + rhs.a * lhs.d + lhs.b * rhs.c + rhs.b * lhs.c),
-            2 * lhs.e * rhs.e,
-        );
+        let val = lhs * rhs;
+        let res = self.intern(val.real, val.imag);
 
         self.prods.insert((first, second), res);
         res
@@ -334,29 +294,8 @@ impl ComplexTable {
 
         let lhs = self.i2complex[num];
         let rhs = self.i2complex[den];
-
-        let lhs_e = lhs.e;
-        let rhs_e = rhs.e;
-        let lhs = [lhs.a, lhs.b, lhs.c, lhs.d].map(BigInt::from);
-        let rhs = [rhs.a, rhs.b, rhs.c, rhs.d].map(BigInt::from);
-        let [la, lb, lc, ld] = lhs;
-        let [ra, rb, rc, rd] = rhs;
-
-        let temp1 = 2 * (&ra * &ra + &rc * &rc) + &rb * &rb + &rd * &rd;
-        let temp2 = &ra * &rb + &rc * &rd;
-        let temp3 = 2 * (&la * &ra + &lc * &rc) + &lb * &rb + &ld * &rd;
-        let temp4 = 2 * (&la * &rb + &lb * &ra + &lc * &rd + &ld * &rd);
-        let temp5 = 2 * (&lc * &ra - &la * &rc) + &ld * &rb - &lb * &rd;
-        let temp6 = 2 * (&lc * &rb + &ld * &ra - &la * &rd - &lb * &rc);
-
-        let [a, b, c, d, e] = normalize_bigints([
-            BigInt::from(rhs_e) * (&temp1 * &temp3 - 2 * &temp2 * &temp4),
-            BigInt::from(rhs_e) * (&temp1 * &temp4 - 4 * &temp2 * &temp3),
-            BigInt::from(rhs_e) * (&temp1 * &temp5 - 2 * &temp2 * &temp6),
-            BigInt::from(rhs_e) * (&temp1 * &temp6 - 4 * &temp2 * &temp5),
-            BigInt::from(lhs_e) * (&temp1 * &temp1 - 8 * &temp2 * &temp2),
-        ]);
-        let res = self.intern(a, b, c, d, e);
+        let res_val = lhs / rhs;
+        let res = self.intern(res_val.real, res_val.imag);
 
         self.quots.insert((num, den), res);
         res
@@ -527,7 +466,7 @@ impl Qmdd {
 
     fn reconstruct_state(&mut self) -> Vec<ComplexVal> {
         let dim = 1 << self.num_vars;
-        let mut output = vec![ComplexVal::new(0, 0, 0, 0, 1); dim];
+        let mut output = vec![ComplexVal::new(0.0, 0.0); dim];
                 
         for state in 0..dim {
             let mut value = self.state.weight;
@@ -562,13 +501,7 @@ impl Qmdd {
         }
         let lhs = self.complex.get(a);
         let rhs = self.complex.get(b);
-        let val = ComplexVal::new(
-            2 * lhs.a * rhs.a + rhs.b * lhs.b - 2 * lhs.c * rhs.c - lhs.d * rhs.d,
-            2 * (lhs.a * rhs.b + rhs.a * lhs.b - lhs.c * rhs.d - rhs.c * lhs.d),
-            2 * lhs.a * rhs.c + 2 * rhs.a * lhs.c + lhs.b * rhs.d + rhs.b * lhs.d,
-            2 * (lhs.a * rhs.d + rhs.a * lhs.d + lhs.b * rhs.c + rhs.b * lhs.c),
-            2 * lhs.e * rhs.e,
-        );
+        let val = lhs * rhs;
         self.complex.complex2i[&val]
     }
 
@@ -1085,16 +1018,27 @@ impl QuantumExecution for Qmdd {
 mod tests {
     use super::*;
 
+    fn assert_states_close(actual: &[ComplexVal], expected: &[ComplexVal]) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                (actual.re() - expected.re()).abs() < 1e-10
+                    && (actual.im() - expected.im()).abs() < 1e-10,
+                "State {index} differs: {actual:?} != {expected:?}"
+            );
+        }
+    }
+
     #[test]
     fn single_qubit_h_test() {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 1, 0, 0, 1),
-            ComplexVal::new(0, 1, 0, 0, 1)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0),
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0)
         ];
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
     }
 
     #[test]
@@ -1104,12 +1048,12 @@ mod tests {
         sim.hadamard(1, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(1, 0, 0, 0, 2), // |00> amplitude (1/2)
-            ComplexVal::new(1, 0, 0, 0, 2), // |01> amplitude (1/2)
-            ComplexVal::new(1, 0, 0, 0, 2), // |10> amplitude (1/2)
-            ComplexVal::new(1, 0, 0, 0, 2), // |11> amplitude (1/2)
+            ComplexVal::new(0.5, 0.0), // |00> amplitude (1/2)
+            ComplexVal::new(0.5, 0.0), // |01> amplitude (1/2)
+            ComplexVal::new(0.5, 0.0), // |10> amplitude (1/2)
+            ComplexVal::new(0.5, 0.0), // |11> amplitude (1/2)
         ];
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
     }
 
     #[test]
@@ -1119,12 +1063,12 @@ mod tests {
         sim.pauli_x(1, &[0]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 1, 0, 0, 1), // |00> amplitude (sqrt(2)/2)
-            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
-            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
-            ComplexVal::new(0, 1, 0, 0, 1), // |11> amplitude (sqrt(2)/2)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |00> amplitude (sqrt(2)/2)
+            ComplexVal::new(0.0, 0.0), // |01> amplitude (0)
+            ComplexVal::new(0.0, 0.0), // |10> amplitude (0)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |11> amplitude (sqrt(2)/2)
         ];
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
     }
 
     #[test]
@@ -1133,10 +1077,10 @@ mod tests {
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 1, 0, 0, 1), // |0> amplitude (sqrt(2)/2)
-            ComplexVal::new(0, 1, 0, 0, 1), // |1> amplitude (sqrt(2)/2)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |0> amplitude (sqrt(2)/2)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |1> amplitude (sqrt(2)/2)
         ];
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
 
         let p1 = sim.measure_p1(0);
         assert!((p1 - 0.5).abs() < 1e-12, "Wrong probability before measure: {p1:?} != 0.5");
@@ -1145,10 +1089,10 @@ mod tests {
         let p1 = sim.measure_p1(0);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 0, 0, 0, 1), // |0> amplitude (1)
-            ComplexVal::new(1, 0, 0, 0, 1), // |1> amplitude (0)
+            ComplexVal::new(0.0, 0.0), // |0> amplitude (0)
+            ComplexVal::new(1.0, 0.0), // |1> amplitude (1)
         ];
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
         assert!((p1 - 1.0).abs() < 1e-12, "Wrong probability after measure: {p1:?} != 1.0");
     }
 
@@ -1160,13 +1104,13 @@ mod tests {
 
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 1, 0, 0, 1), // |00> amplitude (sqrt(2)/2)
-            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
-            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
-            ComplexVal::new(0, 1, 0, 0, 1), // |11> amplitude (sqrt(2)/2)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |00> amplitude (sqrt(2)/2)
+            ComplexVal::new(0.0, 0.0), // |01> amplitude (0)
+            ComplexVal::new(0.0, 0.0), // |10> amplitude (0)
+            ComplexVal::new(FRAC_1_SQRT_2, 0.0), // |11> amplitude (sqrt(2)/2)
         ];
         let p1 = sim.measure_p1(0);
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
         assert!((p1 - 0.5).abs() < 1e-12, "Wrong probability before measure: {p1:?} != 0.5");
 
         // Collapse the superposition to |11>
@@ -1174,13 +1118,13 @@ mod tests {
         sim.measure_collapse(0, true, p);
         let state = sim.reconstruct_state();
         let expected = vec![
-            ComplexVal::new(0, 0, 0, 0, 1), // |00> amplitude (0)
-            ComplexVal::new(0, 0, 0, 0, 1), // |01> amplitude (0)
-            ComplexVal::new(0, 0, 0, 0, 1), // |10> amplitude (0)
-            ComplexVal::new(1, 0, 0, 0, 1), // |11> amplitude (1)
+            ComplexVal::new(0.0, 0.0), // |00> amplitude (0)
+            ComplexVal::new(0.0, 0.0), // |01> amplitude (0)
+            ComplexVal::new(0.0, 0.0), // |10> amplitude (0)
+            ComplexVal::new(1.0, 0.0), // |11> amplitude (1)
         ];
         let p1 = sim.measure_p1(0);
-        assert_eq!(state, expected);
+        assert_states_close(&state, &expected);
         assert!((p1 - 1.0).abs() < 1e-12, "Wrong probability after measure: {p1:?} != 1.0");
     }
 
