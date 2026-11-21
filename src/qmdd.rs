@@ -895,6 +895,30 @@ impl Qmdd {
         }
         sum
     }
+
+    fn _bfs_traversal(&self) {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(self.state.dest);
+
+        while let Some(v_id) = queue.pop_front() {
+            if !visited.insert(v_id) { continue; }
+            let v = &self.vertices[v_id];
+            println!("Vertex ID: {}, Variable: {}, Prob: {}", v_id, v.variable, v.prob);
+            match &v.edges {
+                Edges::Terminal => {
+                    println!("  Terminal vertex");
+                }
+                Edges::Vector(edges) => {
+                    for (i, edge) in edges.iter().enumerate() {
+                        println!("  Edge {}: Dest: {}, Weight ID: {}", i, edge.dest, edge.weight);
+                        queue.push_back(edge.dest);
+                    }
+                }
+                Edges::Matrix(_) => { panic!("There shouldn't be a matrix in the state vector") }
+            }
+        }
+    }
 }
 
 impl QuantumExecution for Qmdd {
