@@ -433,31 +433,27 @@ impl Qmdd {
     }
 
     /// Returns all non-zero basis states and their `(re, im)` amplitudes via preorder DFS.
-    pub fn strong_simulate(&self, decimals: u32) -> Vec<(String, f64, f64)> {
+    // TODO: Replace dump by this
+    // TODO: Replace string with Vec<u64> as is the ket interface
+    pub fn strong_simulate(&self) -> Vec<(Vec<u64>, f64, f64)> {
         assert!(self.state.weight != ComplexTable::ZERO, "State entry is a zero edge.");
         let mut results = Vec::new();
-        let mut stack = vec![(self.state.dest, self.state.weight, String::new())];
-        let pad = 10f64.powi(decimals as i32);
+        let mut stack = vec![(self.state.dest, self.state.weight, vec![0])];
 
         while let Some((v_id, w, s)) = stack.pop() {
             let v = &self.vertices[v_id];
             if v.edges.is_terminal() {
                 let c = self.complex.get(w);
-                let re = (c.re() * pad).round() / pad;
-                let im = (c.im() * pad).round() / pad;
-                results.push((s, re, im));
+                results.push((s, c.re(), c.im()));
                 continue;
             }
 
             let edges = v.edges.as_slice();
             for i in [1usize, 0usize] {
                 if edges[i].weight != ComplexTable::ZERO {
-                    let bit = if i == 0 { '0' } else { '1' };
-                    let mut next_s = String::with_capacity(s.len() + 1);
-                    next_s.push(bit);
-                    next_s.push_str(&s);
+                    let s: u64 = s[0] | (i as u64) << v.variable;
                     let next_w = self.complex_mul_readonly(w, edges[i].weight);
-                    stack.push((edges[i].dest, next_w, next_s));
+                    stack.push((edges[i].dest, next_w, vec![s]));
                 }
             }
         }
@@ -523,12 +519,15 @@ impl Qmdd {
         id
     }
 
+    /// Normalizes a non-redundant set of edges
     fn normalize(&mut self, edges: &mut Edges, rule: NormRule) -> (ComplexId, f64) {
         let slice = edges.as_slice();
         if slice.is_empty() {
             return (ComplexTable::ONE, 1.0);
         }
 
+        // Chooses a factor to normalize the edges based on the normalization rule
+        // Not sure why the rule isn't always FirstNonZero. But the implementation is using MaxMagnitude so idk
         let factor = match rule {
             NormRule::FirstNonZero => slice
                 .iter()
@@ -541,6 +540,7 @@ impl Qmdd {
             }
         };
 
+        // Divide all edges weights by the chosen factor
         if factor != ComplexTable::ZERO {
             match edges {
                 Edges::Vector(arr) => {
@@ -557,6 +557,7 @@ impl Qmdd {
             }
         }
 
+        // TODO: What the fuck
         let prob = match edges {
             Edges::Vector(arr) => {
                 let p0 = self.vertices[arr[0].dest].prob * self.complex.get(arr[0].weight).mag2();
@@ -569,6 +570,7 @@ impl Qmdd {
         (factor, prob)
     }
 
+    // TODO: Maybe I needed to explain this in the paper
     fn is_trivial(edges: &Edges) -> bool {
         if let Edges::Matrix(e) = edges {
             e[0].weight == e[3].weight
@@ -581,6 +583,8 @@ impl Qmdd {
         }
     }
 
+    // Returns true if all edges are identical (same destination and weight).
+    // Terminal edges are never redundant and Vectors do not apply
     fn is_redundant(edges: &Edges) -> bool {
         if let Edges::Matrix(e) = edges {
             e.iter()
@@ -628,6 +632,7 @@ impl Qmdd {
         Edge { dest, weight }
     }
 
+    /// Creates a vector edge representing |0>^num_vars, which is the ground state of the system.
     fn ground_state(&mut self) -> Edge {
         let mut e = Edge {
             dest: self.terminal,
@@ -719,6 +724,8 @@ impl Qmdd {
         }
     }
 
+    // For this implementation, multiplication is always applied between a matrix and a vector
+    // There is no need for matrix-matrix multiplication
     fn multiply(&mut self, matrix: Edge, vector: Edge, level: usize) -> Edge {
         if matrix.weight == ComplexTable::ZERO || vector.weight == ComplexTable::ZERO {
             return Edge {
@@ -835,6 +842,7 @@ impl Qmdd {
         self.state.weight = self.complex.mul(self.state.weight, p);
     }
 
+    // TODO: FIX THIS
     fn calc_prob_recursive(
         &self,
         v_id: VertexId,
@@ -922,7 +930,6 @@ impl QuantumExecution for Qmdd {
         self.apply_gate(phase_matrix, target, control);
     }
 
-    // TODO: Implement Rz as a phase gate, and Rx/Ry as a combination of H and Rz.
     fn rx(&mut self, theta: f64, target: usize, control: &[usize]) {
         let t = theta/2.0;
         let c = self.complex.from_float(t.cos(), true);
@@ -968,15 +975,15 @@ impl QuantumExecution for Qmdd {
         self.calc_prob_recursive(self.state.dest, self.state.weight, target, &mut memo)
     }
 
+    // Apply collapse matrix appropriate to observed result then renormalize the state vector edge
     fn measure_collapse(&mut self, target: usize, result: bool, p: f64) {
         let matrix = if result { M1_MATRIX } else { M0_MATRIX };
         self.apply_gate(matrix, target, &[]);
-        // TODO: Normalize weights after measurement collapse.
         self.renormalize(p);
-        // self.root.weight = self.root.weight * Complex::<f64>::new(p, 0.0);
     }
 
     // TODO: Replace this by a function that doesn't need 2^n vector for any ammount of qubits
+    // Strong simulate does it but I still need to project the states into the states created by *qubits*
     fn dump(&mut self, qubits: &[usize]) -> DumpData {
         let output = self.reconstruct_state();
         let mut basis_states = Vec::new();
@@ -1030,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn single_qubit_h_test() {
+    fn single_qubit_h() {
         let mut sim = Qmdd::new(1);
         sim.hadamard(0, &[]);
         let state = sim.reconstruct_state();
@@ -1042,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn double_qubit_h_test() {
+    fn double_qubit_h() {
         let mut sim = Qmdd::new(2);
         sim.hadamard(0, &[]);
         sim.hadamard(1, &[]);
@@ -1057,7 +1064,7 @@ mod tests {
     }
 
     #[test]
-    fn bell_test() {
+    fn bell() {
         let mut sim = Qmdd::new(2);
         sim.hadamard(0, &[]);
         sim.pauli_x(1, &[0]);
