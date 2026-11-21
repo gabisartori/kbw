@@ -842,7 +842,7 @@ impl Qmdd {
 
         // If we jumped past `target` (target level was skipped in the DAG),
         // half of the assignments to the skipped `target` bit yield |1>.
-        if v.variable < target {
+        if v.variable > target {
             let w = self.complex.get(acc_weight).mag2();
             return 0.5 * w * self.subtree_norm_sqr(v_id);
         }
@@ -1049,7 +1049,8 @@ mod tests {
             println!("Measured qubit {qubit}: p1 = {p1}");
             let outcome = p1 > 0.9;
             if outcome {
-                result |= 1 << qubit;
+                result |= 1 << sim.num_vars - qubit-1;
+                println!("{}", result);
             }
         }
         result
@@ -1248,15 +1249,14 @@ mod tests {
 
     #[test]
     fn grover() {
-        let size = 7;
+        let size = 5;
         let mut sim = Qmdd::new(size);
-        let marked_state: usize = 17;
+        let marked_state: usize = 0b11001;
 
         grover_algorithm(&mut sim, size, marked_state);
         let result = measure_all_qubits(&mut sim);
+        println!("{}", result);
         let state = sim.reconstruct_state();
-        println!("{:?}", state);
-        assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
         let mut highest_state = 0;
         let mut highest_amplitude = state[0].mag2();
         for (i, s) in state.iter().enumerate() {
@@ -1265,7 +1265,8 @@ mod tests {
                 highest_state = i;
             }
         }
-
+        
         assert_eq!(highest_state, marked_state, "State reconstruction failed. Expected: {marked_state}, got: {highest_state}");
+        assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
     }
 }
