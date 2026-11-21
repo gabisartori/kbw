@@ -1036,6 +1036,18 @@ mod tests {
         }
     }
 
+    fn measure_all_qubits(sim: &mut Qmdd) -> u64 {
+        let mut result = 0u64;
+        for qubit in 0..sim.num_vars {
+            let p1 = sim.measure_p1(qubit);
+            let outcome = p1 > 0.5;
+            if outcome {
+                result |= 1 << qubit;
+            }
+        }
+        result
+    }
+
     #[test]
     fn single_qubit_h() {
         let mut sim = Qmdd::new(1);
@@ -1170,11 +1182,7 @@ mod tests {
         // }
     }
 
-    #[test]
-    fn grover() {
-        let size = 7;
-        let mut sim = Qmdd::new(size);
-        let marked_state: usize = 17;
+    fn grover_algorithm(sim: &mut Qmdd, size: usize, marked_state: usize) {
         let qubits: Vec<usize> = (0..size).collect();
         let controls_0_to_n_minus_1: Vec<usize> = (0..size - 1).collect();
 
@@ -1219,7 +1227,17 @@ mod tests {
                 sim.hadamard(q, &[]);
             }
         }
+    }
 
+    #[test]
+    fn grover() {
+        let size = 7;
+        let mut sim = Qmdd::new(size);
+        let marked_state: usize = 17;
+
+        grover_algorithm(&mut sim, size, marked_state);
+        let result = measure_all_qubits(&mut sim);
+        assert_eq!(result, marked_state as u64, "Grover's algorithm did not find the marked state. Expected: {marked_state}, got: {result}");
         let state = sim.reconstruct_state();
         let marked_index = (0..size).fold(0, |index, bit| {
             index | (((marked_state >> (size - 1 - bit)) & 1) << bit)
