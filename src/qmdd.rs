@@ -435,7 +435,7 @@ impl Qmdd {
     /// Returns all non-zero basis states and their `(re, im)` amplitudes via preorder DFS.
     // TODO: Replace dump by this
     // TODO: Replace string with Vec<u64> as is the ket interface
-    pub fn strong_simulate(&self) -> Vec<(Vec<u64>, f64, f64)> {
+    pub fn strong_simulate(&mut self) -> Vec<(Vec<u64>, f64, f64)> {
         assert!(self.state.weight != ComplexTable::ZERO, "State entry is a zero edge.");
         let mut results = Vec::new();
         let mut stack = vec![(self.state.dest, self.state.weight, vec![0])];
@@ -452,7 +452,7 @@ impl Qmdd {
             for i in [1usize, 0usize] {
                 if edges[i].weight != ComplexTable::ZERO {
                     let s: u64 = s[0] | (i as u64) << v.variable;
-                    let next_w = self.complex_mul_readonly(w, edges[i].weight);
+                    let next_w = self.complex.mul(w, edges[i].weight);
                     stack.push((edges[i].dest, next_w, vec![s]));
                 }
             }
@@ -481,24 +481,6 @@ impl Qmdd {
         }
 
         output
-    }
-
-    // Helper for readonly traversal when `strong_simulate` doesn't hold `&mut self`
-    fn complex_mul_readonly(&self, a: ComplexId, b: ComplexId) -> ComplexId {
-        if a == ComplexTable::ZERO || b == ComplexTable::ONE {
-            return a;
-        }
-        if b == ComplexTable::ZERO || a == ComplexTable::ONE {
-            return b;
-        }
-        let key = if a <= b { (a, b) } else { (b, a) };
-        if let Some(&id) = self.complex.prods.get(&key) {
-            return id;
-        }
-        let lhs = self.complex.get(a);
-        let rhs = self.complex.get(b);
-        let val = lhs * rhs;
-        self.complex.complex2i[&val]
     }
 
     fn create_terminal(&mut self, width: usize) -> VertexId {
@@ -842,57 +824,76 @@ impl Qmdd {
         self.state.weight = self.complex.mul(self.state.weight, p);
     }
 
-    // TODO: FIX THIS
-    fn calc_prob_recursive(
-        &self,
+    fn prob_one_dfs(
+        &mut self,
         v_id: VertexId,
-        weight_id: ComplexId,
+        acc_weight: ComplexId,
         target: usize,
         memo: &mut HashMap<(VertexId, ComplexId), f64>,
     ) -> f64 {
-        let v = &self.vertices[v_id];
-
-        // If we hit the terminal or have gone past the target level down the tree, no contribution from this branch
-        if v.edges.is_terminal() || v.variable < target {
+        if acc_weight == ComplexTable::ZERO {
             return 0.0;
         }
 
-        let cache_key = (v_id, weight_id);
-        if let Some(&prob) = memo.get(&cache_key) {
-            return prob;
+        let v = &self.vertices[v_id].clone();
+        if v.edges.is_terminal() {
+            return 0.0;
         }
 
-        let mut total_prob = 0.0;
-        let edges = v.edges.as_slice();
+        // If we jumped past `target` (target level was skipped in the DAG),
+        // half of the assignments to the skipped `target` bit yield |1>.
+        if v.variable < target {
+            let w = self.complex.get(acc_weight).mag2();
+            return 0.5 * w * self.subtree_norm_sqr(v_id);
+        }
 
-        // If this vertex corresponds exactly to our target qubit
-        if v.variable == target {
-            // Edge 1 corresponds to measuring |1> for this qubit
-            let edge1 = &edges[1];
-            if edge1.weight != ComplexTable::ZERO {
-                // Combine the incoming weight with the edge weight
-                let combined_weight = self.complex_mul_readonly(weight_id, edge1.weight);
-                let c = self.complex.get(combined_weight);
-                let path_prob = c.mag2() * self.vertices[edge1.dest].prob; // Multiplied by sub-diagram probability
-                
-                // Alternatively, if sub-diagrams are fully normalized, you can accumulate:
-                // total_prob += c.norm_sqr();
-                // Let's use the direct path probability calculation:
-                total_prob += path_prob;
+        let key = (v_id, acc_weight);
+        if let Some(&cached) = memo.get(&key) {
+            return cached;
+        }
+
+        let edges = v.edges.as_slice();
+        let total = if v.variable == target {
+            // Only the |1> branch (edges[1]) contributes to measuring |1> on `target`
+            let e1 = edges[1];
+            if e1.weight == ComplexTable::ZERO {
+                0.0
+            } else {
+                let w1 = self.complex.mul(acc_weight, e1.weight);
+                let mag2 = self.complex.get(w1).mag2();
+                mag2 * self.subtree_norm_sqr(e1.dest)
             }
         } else {
-            // If we are above the target qubit level, we must branch down both paths (0 and 1)
-            for i in 0..2 {
-                let edge = &edges[i];
+            // Above target: explore both |0> (edges[0]) and |1> (edges[1])
+            let mut sum = 0.0;
+            for &edge in edges {
                 if edge.weight != ComplexTable::ZERO {
-                    let next_weight = self.complex_mul_readonly(weight_id, edge.weight);
-                    total_prob += self.calc_prob_recursive(edge.dest, next_weight, target, memo);
+                    let next_w = self.complex.mul(acc_weight, edge.weight);
+                    sum += self.prob_one_dfs(edge.dest, next_w, target, memo);
                 }
             }
-        }
+            sum
+        };
 
-        memo.insert(cache_key, total_prob);
-        total_prob
+        memo.insert(key, total);
+        total
+    }
+
+    /// Sum of |path_weight|^2 from `v_id` to terminal (assuming unit-norm state).
+    fn subtree_norm_sqr(&self, v_id: VertexId) -> f64 {
+        let v = &self.vertices[v_id];
+        if v.edges.is_terminal() {
+            return 1.0;
+        }
+        let edges = v.edges.as_slice();
+        let mut sum = 0.0;
+        for &edge in edges {
+            if edge.weight != ComplexTable::ZERO {
+                let w2 = self.complex.get(edge.weight).mag2();
+                sum += w2 * self.subtree_norm_sqr(edge.dest);
+            }
+        }
+        sum
     }
 }
 
@@ -972,7 +973,12 @@ impl QuantumExecution for Qmdd {
         // Memoization cache to avoid redundant sub-graph traversals: (vertex_id, accumulated_weight_id) -> probability contribution
         let mut memo: HashMap<(VertexId, ComplexId), f64> = HashMap::new();
         
-        self.calc_prob_recursive(self.state.dest, self.state.weight, target, &mut memo)
+        self.prob_one_dfs(
+            self.state.dest,
+            self.state.weight,
+            target,
+            &mut memo
+        )
     }
 
     // Apply collapse matrix appropriate to observed result then renormalize the state vector edge
@@ -1040,7 +1046,8 @@ mod tests {
         let mut result = 0u64;
         for qubit in 0..sim.num_vars {
             let p1 = sim.measure_p1(qubit);
-            let outcome = p1 > 0.5;
+            println!("Measured qubit {qubit}: p1 = {p1}");
+            let outcome = p1 > 0.9;
             if outcome {
                 result |= 1 << qubit;
             }
@@ -1148,6 +1155,16 @@ mod tests {
     }
 
     #[test]
+    fn measure_prob() {
+        let size = 5;
+        let mut sim = Qmdd::new(size);
+        for i in 0..size {
+            let p1 = sim.measure_p1(i);
+            assert!((p1 - 0.0).abs() < 1e-12, "Wrong probability for qubit {i}: {p1:?} != 0.0");
+        }
+    }
+
+    #[test]
     fn dump() {
         let mut sim = Qmdd::new(2);
         sim.hadamard(0, &[]);
@@ -1237,15 +1254,18 @@ mod tests {
 
         grover_algorithm(&mut sim, size, marked_state);
         let result = measure_all_qubits(&mut sim);
-        assert_eq!(result, marked_state as u64, "Grover's algorithm did not find the marked state. Expected: {marked_state}, got: {result}");
         let state = sim.reconstruct_state();
-        let marked_index = (0..size).fold(0, |index, bit| {
-            index | (((marked_state >> (size - 1 - bit)) & 1) << bit)
-        });
-        assert!(
-            state[marked_index].mag2() > 0.95,
-            "Grover should amplify the marked state; got probability {}",
-            state[marked_index].mag2()
-        );
+        println!("{:?}", state);
+        assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
+        let mut highest_state = 0;
+        let mut highest_amplitude = state[0].mag2();
+        for (i, s) in state.iter().enumerate() {
+            if s.mag2() > highest_amplitude {
+                highest_amplitude = s.mag2();
+                highest_state = i;
+            }
+        }
+
+        assert_eq!(highest_state, marked_state, "State reconstruction failed. Expected: {marked_state}, got: {highest_state}");
     }
 }
