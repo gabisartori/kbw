@@ -4,7 +4,7 @@ use crate::quantum_execution::QuantumExecution;
 use ket::error::KetError;
 use ket::execution::DumpData;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::hash::{Hash, Hasher};
 
@@ -1070,12 +1070,8 @@ mod tests {
         let mut result = 0u64;
         for qubit in 0..sim.num_vars {
             let p1 = sim.measure_p1(qubit);
-            println!("Measured qubit {qubit}: p1 = {p1}");
             let outcome = p1 > 0.9;
-            if outcome {
-                result |= 1 << sim.num_vars - qubit-1;
-                println!("{}", result);
-            }
+            if outcome { result |= 1 << qubit; }
         }
         result
     }
@@ -1239,7 +1235,7 @@ mod tests {
         for _ in 0..iterations {
             // --- Oracle: flip phase of `marked_state` ---
             for (i, &q) in qubits.iter().enumerate() {
-                if ((marked_state >> (size - 1 - i)) & 1) == 0 {
+                if ((marked_state >> i) & 1) == 0 {
                     sim.pauli_x(q, &[]);
                 }
             }
@@ -1249,7 +1245,7 @@ mod tests {
             sim.hadamard(size-1, &[]);
             // Uncompute X gates
             for (i, &q) in qubits.iter().enumerate() {
-                if ((marked_state >> (size-1 - i)) & 1) == 0 {
+                if ((marked_state >> i) & 1) == 0 {
                     sim.pauli_x(q, &[]);
                 }
             }
@@ -1273,13 +1269,12 @@ mod tests {
 
     #[test]
     fn grover() {
-        let size = 5;
+        let size = 10;
         let mut sim = Qmdd::new(size);
-        let marked_state: usize = 0b11001;
+        let marked_state: usize = 17;
 
         grover_algorithm(&mut sim, size, marked_state);
         let result = measure_all_qubits(&mut sim);
-        println!("{}", result);
         let state = sim.reconstruct_state();
         let mut highest_state = 0;
         let mut highest_amplitude = state[0].mag2();
@@ -1289,7 +1284,7 @@ mod tests {
                 highest_state = i;
             }
         }
-        
+
         assert_eq!(highest_state, marked_state, "State reconstruction failed. Expected: {marked_state}, got: {highest_state}");
         assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
     }
