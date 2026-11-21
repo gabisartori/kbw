@@ -166,6 +166,7 @@ pub struct ComplexTable {
     sums: HashMap<(ComplexId, ComplexId), ComplexId>,
     prods: HashMap<(ComplexId, ComplexId), ComplexId>,
     quots: HashMap<(ComplexId, ComplexId), ComplexId>,
+    cache_metrics: ComplexCacheMetrics,
 }
 
 impl ComplexTable {
@@ -186,6 +187,7 @@ impl ComplexTable {
             sums: HashMap::new(),
             prods: HashMap::new(),
             quots: HashMap::new(),
+            cache_metrics: ComplexCacheMetrics::default(),
         };
         table.reset();
         table
@@ -197,6 +199,7 @@ impl ComplexTable {
         self.sums.clear();
         self.prods.clear();
         self.quots.clear();
+        self.cache_metrics = ComplexCacheMetrics::default();
 
         self.intern(0.0, 0.0); // 0: ZERO
         self.intern(1.0, 0.0); // 1: ONE
@@ -207,6 +210,12 @@ impl ComplexTable {
         self.intern(-FRAC_1_SQRT_2, 0.0); // 6: NEG_A
         self.intern(FRAC_1_SQRT_2, FRAC_1_SQRT_2); // 7: B
         self.intern(FRAC_1_SQRT_2, -FRAC_1_SQRT_2); // 8: C
+        self.cache_metrics = ComplexCacheMetrics::default();
+    }
+
+    /// Resets complex-table cache counters.
+    pub fn reset_cache_metrics(&mut self) {
+        self.cache_metrics = ComplexCacheMetrics::default();
     }
 
     pub fn from_float(&mut self, x: f64, real: bool) -> ComplexId {
@@ -217,12 +226,18 @@ impl ComplexTable {
     pub fn intern(&mut self, real: f64, imag: f64) -> ComplexId {
         let val = ComplexVal::new(real, imag);
         if let Some(&id) = self.complex2i.get(&val) {
+            self.cache_metrics.intern.hits += 1;
             return id;
         }
+        self.cache_metrics.intern.misses += 1;
         let id = self.i2complex.len();
         self.i2complex.push(val);
         self.complex2i.insert(val, id);
         id
+    }
+
+    pub fn cache_metrics(&self) -> ComplexCacheMetrics {
+        self.cache_metrics
     }
 
     #[inline]
@@ -238,8 +253,10 @@ impl ComplexTable {
             return second;
         }
         if let Some(&cached) = self.sums.get(&(first, second)) {
+            self.cache_metrics.add.hits += 1;
             return cached;
         }
+        self.cache_metrics.add.misses += 1;
 
         let lhs = self.i2complex[first];
         let rhs = self.i2complex[second];
@@ -262,8 +279,10 @@ impl ComplexTable {
             return second;
         }
         if let Some(&cached) = self.prods.get(&(first, second)) {
+            self.cache_metrics.mul.hits += 1;
             return cached;
         }
+        self.cache_metrics.mul.misses += 1;
 
         let lhs = self.i2complex[first];
         let rhs = self.i2complex[second];
@@ -289,8 +308,10 @@ impl ComplexTable {
             return Self::ONE;
         }
         if let Some(&cached) = self.quots.get(&(num, den)) {
+            self.cache_metrics.div.hits += 1;
             return cached;
         }
+        self.cache_metrics.div.misses += 1;
 
         let lhs = self.i2complex[num];
         let rhs = self.i2complex[den];
@@ -386,6 +407,88 @@ pub struct Qmdd {
     prods: HashMap<(Edge, Edge), Edge>,
     terminal: VertexId,
     state: Edge,
+    cache_metrics: QmddCacheMetrics,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct CacheMetrics {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl std::fmt::Debug for CacheMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CacheMetrics {{ hits: {}, misses: {}, lookups: {}, hit_rate: {:.2} }}",
+            self.hits,
+            self.misses,
+            self.lookups(),
+            self.hit_rate()
+        )
+    }
+}
+
+impl CacheMetrics {
+    pub fn lookups(&self) -> u64 {
+        self.hits + self.misses
+    }
+
+    pub fn hit_rate(&self) -> f64 {
+        let lookups = self.lookups();
+        if lookups == 0 {
+            0.0
+        } else {
+            self.hits as f64 / lookups as f64
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ComplexCacheMetrics {
+    pub intern: CacheMetrics,
+    pub add: CacheMetrics,
+    pub mul: CacheMetrics,
+    pub div: CacheMetrics,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct QmddCacheMetrics {
+    pub unique_table: CacheMetrics,
+    pub edge_sum: CacheMetrics,
+    pub edge_product: CacheMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub struct QmddMetrics {
+    pub num_vars: usize,
+    pub vertices: usize,
+    pub vertices_capacity: usize,
+    pub unique_table_entries: usize,
+    pub unique_table_capacity: usize,
+    pub edge_sum_entries: usize,
+    pub edge_sum_capacity: usize,
+    pub edge_product_entries: usize,
+    pub edge_product_capacity: usize,
+    pub complex_values: usize,
+    pub complex_values_capacity: usize,
+    pub complex2i_entries: usize,
+    pub complex2i_capacity: usize,
+    pub complex_sum_entries: usize,
+    pub complex_sum_capacity: usize,
+    pub complex_product_entries: usize,
+    pub complex_product_capacity: usize,
+    pub complex_quotient_entries: usize,
+    pub complex_quotient_capacity: usize,
+    pub estimated_memory_bytes: usize,
+    pub caches: QmddCacheMetrics,
+    pub complex_caches: ComplexCacheMetrics,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheSizeSnapshot {
+    pub entries: usize,
+    pub capacity: usize,
 }
 
 impl Qmdd {
@@ -403,6 +506,7 @@ impl Qmdd {
                 dest: 0,
                 weight: ComplexTable::ONE,
             },
+            cache_metrics: QmddCacheMetrics::default(),
         };
 
         sim.terminal = sim.create_terminal(num_vars);
@@ -416,6 +520,64 @@ impl Qmdd {
         &mut self.complex
     }
 
+    /// Resets cumulative cache counters without clearing simulator state.
+    pub fn reset_cache_metrics(&mut self) {
+        self.cache_metrics = QmddCacheMetrics::default();
+        self.complex.reset_cache_metrics();
+    }
+
+    /// Returns cumulative cache counters and a snapshot of the simulator's
+    /// retained data structures.
+    pub fn metrics(&self) -> QmddMetrics {
+        let estimated_memory_bytes = self.vertices.capacity() * std::mem::size_of::<Vertex>()
+            + self.unique_table.capacity()
+                * (std::mem::size_of::<VertexKey>() + std::mem::size_of::<VertexId>())
+            + self.sums.capacity()
+                * (std::mem::size_of::<(Edge, Edge)>() + std::mem::size_of::<Edge>())
+            + self.prods.capacity()
+                * (std::mem::size_of::<(Edge, Edge)>() + std::mem::size_of::<Edge>())
+            + self.complex.i2complex.capacity() * std::mem::size_of::<ComplexVal>()
+            + self.complex.complex2i.capacity()
+                * (std::mem::size_of::<ComplexVal>() + std::mem::size_of::<ComplexId>())
+            + self.complex.sums.capacity()
+                * (std::mem::size_of::<(ComplexId, ComplexId)>() + std::mem::size_of::<ComplexId>())
+            + self.complex.prods.capacity()
+                * (std::mem::size_of::<(ComplexId, ComplexId)>() + std::mem::size_of::<ComplexId>())
+            + self.complex.quots.capacity()
+                * (std::mem::size_of::<(ComplexId, ComplexId)>() + std::mem::size_of::<ComplexId>());
+
+        QmddMetrics {
+            num_vars: self.num_vars,
+            vertices: self.vertices.len(),
+            vertices_capacity: self.vertices.capacity(),
+            unique_table_entries: self.unique_table.len(),
+            unique_table_capacity: self.unique_table.capacity(),
+            edge_sum_entries: self.sums.len(),
+            edge_sum_capacity: self.sums.capacity(),
+            edge_product_entries: self.prods.len(),
+            edge_product_capacity: self.prods.capacity(),
+            complex_values: self.complex.i2complex.len(),
+            complex_values_capacity: self.complex.i2complex.capacity(),
+            complex2i_entries: self.complex.complex2i.len(),
+            complex2i_capacity: self.complex.complex2i.capacity(),
+            complex_sum_entries: self.complex.sums.len(),
+            complex_sum_capacity: self.complex.sums.capacity(),
+            complex_product_entries: self.complex.prods.len(),
+            complex_product_capacity: self.complex.prods.capacity(),
+            complex_quotient_entries: self.complex.quots.len(),
+            complex_quotient_capacity: self.complex.quots.capacity(),
+            estimated_memory_bytes,
+            caches: self.cache_metrics,
+            complex_caches: self.complex.cache_metrics,
+        }
+    }
+}
+
+// ============================================================================
+// 3. QMDD Simulator Methods
+// ============================================================================
+
+impl Qmdd {
     /// Applies a single-qubit 2x2 gate (in row-major order `[e00, e01, e10, e11]`)
     /// at `target` qubit index, conditioned on all `controls` being in state |1>.
     pub fn apply_gate(&mut self, gate: [ComplexId; 4], target: usize, controls: &[usize]) {
@@ -489,8 +651,10 @@ impl Qmdd {
             edges: Edges::Terminal,
         };
         if let Some(&id) = self.unique_table.get(&key) {
+            self.cache_metrics.unique_table.hits += 1;
             return id;
         }
+        self.cache_metrics.unique_table.misses += 1;
         let id = self.vertices.len();
         self.vertices.push(Vertex {
             variable: width,
@@ -581,7 +745,11 @@ impl Qmdd {
 
         if weight == ComplexTable::ZERO {
             return Edge {
-                dest: self.terminal,
+                dest: if edges.as_slice()[0].dest == self.terminal {
+                    self.terminal
+                } else {
+                    edges.as_slice()[0].dest
+                },
                 weight: ComplexTable::ZERO,
             };
         }
@@ -599,8 +767,10 @@ impl Qmdd {
         };
 
         let dest = if let Some(&existing_id) = self.unique_table.get(&key) {
+            self.cache_metrics.unique_table.hits += 1;
             existing_id
         } else {
+            self.cache_metrics.unique_table.misses += 1;
             let id = self.vertices.len();
             self.vertices.push(Vertex {
                 variable,
@@ -661,8 +831,10 @@ impl Qmdd {
         };
 
         if let Some(&cached) = self.sums.get(&cache_key) {
+            self.cache_metrics.edge_sum.hits += 1;
             return cached;
         }
+        self.cache_metrics.edge_sum.misses += 1;
 
         let is_vec = self.vertices[tensor1.dest].edges.is_vector()
             || self.vertices[tensor2.dest].edges.is_vector();
@@ -725,8 +897,10 @@ impl Qmdd {
 
         let cache_key = (matrix, vector);
         if let Some(&cached) = self.prods.get(&cache_key) {
+            self.cache_metrics.edge_product.hits += 1;
             return cached;
         }
+        self.cache_metrics.edge_product.misses += 1;
 
         let zero_edge = Edge {
             dest: self.terminal,
@@ -1271,7 +1445,7 @@ mod tests {
     fn grover() {
         let size = 10;
         let mut sim = Qmdd::new(size);
-        let marked_state: usize = 17;
+        let marked_state: usize = 0b110101;
 
         grover_algorithm(&mut sim, size, marked_state);
         let result = measure_all_qubits(&mut sim);
@@ -1284,8 +1458,8 @@ mod tests {
                 highest_state = i;
             }
         }
-
         assert_eq!(highest_state, marked_state, "State reconstruction failed. Expected: {marked_state}, got: {highest_state}");
         assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
+        println!("{:?}", sim.metrics());
     }
 }
