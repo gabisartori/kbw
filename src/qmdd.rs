@@ -58,9 +58,17 @@ pub struct ComplexVal {
 
 impl ComplexVal {
     pub fn new(real: f64, imag: f64) -> Self {
+        fn canonical(x: f64) -> f64 {
+            if x.abs() < 1e-12 {
+                0.0
+            } else {
+                (x * 1e12).round() / 1e12
+            }
+        }
+
         Self {
-            real: if real == 0.0 { 0.0 } else { real },
-            imag: if imag == 0.0 { 0.0 } else { imag },
+            real: canonical(real),
+            imag: canonical(imag),
         }
     }
 
@@ -592,6 +600,7 @@ impl Qmdd {
             .variable
             .min(self.vertices[self.state.dest].variable);
         self.state = self.multiply(gate_edge, self.state, level);
+        self.clear_operation_caches();
     }
 
     /// Returns all non-zero basis states and their `(re, im)` amplitudes via preorder DFS.
@@ -1093,6 +1102,16 @@ impl Qmdd {
             }
         }
     }
+
+    /// Releases transient operation caches. Vertices and the interned complex table
+    /// are retained because they represent the current decision diagram state.
+    pub fn clear_operation_caches(&mut self) {
+        self.sums.clear();
+        self.prods.clear();
+        self.complex.sums.clear();
+        self.complex.prods.clear();
+        self.complex.quots.clear();
+    }
 }
 
 impl QuantumExecution for Qmdd {
@@ -1406,7 +1425,8 @@ mod tests {
         // 2. Grover iterations: floor((pi / 4) * sqrt(2^size))
         let iterations = ((std::f64::consts::PI / 4.0) * (2.0_f64.powi(size as i32)).sqrt()) as usize;
 
-        for _ in 0..iterations {
+        for i in 0..iterations {
+            println!("Iteration: {}", i);
             // --- Oracle: flip phase of `marked_state` ---
             for (i, &q) in qubits.iter().enumerate() {
                 if ((marked_state >> i) & 1) == 0 {
@@ -1443,11 +1463,12 @@ mod tests {
 
     #[test]
     fn grover() {
-        let size = 10;
+        let size = 15;
         let mut sim = Qmdd::new(size);
-        let marked_state: usize = 0b110101;
-
+        let marked_state: usize = 1;
+        let start = std::time::Instant::now();
         grover_algorithm(&mut sim, size, marked_state);
+        let end = std::time::Instant::now();
         let result = measure_all_qubits(&mut sim);
         let state = sim.reconstruct_state();
         let mut highest_state = 0;
@@ -1458,8 +1479,30 @@ mod tests {
                 highest_state = i;
             }
         }
+        println!("Time taken to simulate Grover's algorithm with {} qubits: {:?}", size, end-start);
         assert_eq!(highest_state, marked_state, "State reconstruction failed. Expected: {marked_state}, got: {highest_state}");
         assert_eq!(result, marked_state as u64, "Manual measurement failed. Expected: {marked_state}, got: {result}");
+        // println!("{:?}", sim.metrics());
+    }
+
+    #[test]
+    fn agrover_metrics_12_qubits() {
+        let size = 12;
+        let mut sim = Qmdd::new(size);
+        let marked_state: usize = 0b110101;
+
+        grover_algorithm(&mut sim, size, marked_state);
         println!("{:?}", sim.metrics());
+
+        let state = sim.reconstruct_state();
+        let mut highest_state = 0;
+        let mut highest_amplitude = state[0].mag2();
+        for (i, s) in state.iter().enumerate() {
+            if s.mag2() > highest_amplitude {
+                highest_amplitude = s.mag2();
+                highest_state = i;
+            }
+        }
+        assert_eq!(highest_state, marked_state);
     }
 }
